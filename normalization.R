@@ -58,7 +58,6 @@ anno <- anno %>% filter(!duplicated(Basename))
 #define number of cores for parallelization (linux-based machines)
 #code for parallel implcd ..ementation on windows-based machines is different
 options(mc.cores=26)
-
 cores <- options()$mc.cores
 
 # #list of available chips and feature sets for meffil
@@ -194,7 +193,7 @@ fwrite(beta, paste0(batchdir,"/betas_pc8_fixedeffectsMaterial.txt"),
 
 #####################################################
 ######## Make dimension reduction with UWOT  ########
-anno <- openxlsx::read.xlsx("NormRcode/Sample_sheet_test.xlsx")
+anno <- openxlsx::read.xlsx(samplesheet)
 
 PC <- prcomp(t(beta), center = TRUE, scale = FALSE) 
 saveRDS(PC, paste0(batchdir,"/pc_prcomp_puritycorrected.rds"))
@@ -245,7 +244,7 @@ outf <- merge(umap, anno[,c(
 	"Likely_integrated_diagnosis")],
     by = "idat_filename");
 
-fwrite(beta, paste0(batchdir,"/umap_1.txt"), 
+fwrite(outf, paste0(batchdir,"/umap_1.txt"), 
     row.names=TRUE, sep = "\t");
 
 file.rename(samplesheet, gsub(".xlsx",  ".done.xlsx", samplesheet));
