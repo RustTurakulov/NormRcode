@@ -15,4 +15,4 @@ export SINGULARITYENV_THREADS=26
 gpfs_dirs="$(echo /gs* | tr ' ' ',')"
 export SINGULARITY_BINDPATH="/vf,${gpfs_dirs},/spin1,/data,/lscratch,/scratch,/fdb"
 module load singularity
-singularity exec  NormRcode/rbox_v0.sif /usr/bin/Rscript   NormRcode/normalization.R
+singularity exec  NormRcode/rbox_v0.sif /usr/bin/Rscript NormRcode/normalization.R $1

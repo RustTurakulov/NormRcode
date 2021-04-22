@@ -2,12 +2,9 @@ library(data.table)
 library(parallel)
 library(tidyr)
 library(openxlsx)
-#library(SmartSVA, lib = "~/R_libs")
-#library(meffil, lib = "~/R_libs")
 library(meffil)
 library(dplyr)
-
-# Bunch for visualization
+# Bunch for visualization/dimension reduction 
 library(tibble)
 library(uwot)
 library(ggplot2)
@@ -16,9 +13,17 @@ library(gridExtra)
 library(tidyverse)
 library(densvis)
 
+# parsing folder locations  
+args = commandArgs(trailingOnly=TRUE)
+samplesheet <- args[1];
+batchdir    <- sub("(_20[0-9][0-9]-[01][0-9]-[0-9][0-9].xlsx)", "", samplesheet, perl=T);
+batchdir    <- paste0("TRANSFER/SAMPLESHEETS/", batchdir);
+samplesheet <- paste0("TRANSFER/SAMPLESHEETS/", samplesheet);
+dir.create(batchdir);
 
 #create sample sheet
-anno_base <- openxlsx::read.xlsx("NormRcode/Sample_sheet_test.xlsx")
+#anno_base <- openxlsx::read.xlsx("NormRcode/Sample_sheet_test.xlsx")
+anno_base <- openxlsx::read.xlsx(samplesheet)
 
 #filter cases based on string 
 #(in this case, we are interested in all non-duplicate cases)
@@ -52,7 +57,7 @@ anno <- anno %>% filter(!duplicated(Basename))
 
 #define number of cores for parallelization (linux-based machines)
 #code for parallel implcd ..ementation on windows-based machines is different
-options(mc.cores=54)
+options(mc.cores=26)
 
 cores <- options()$mc.cores
 
@@ -71,8 +76,8 @@ qc.objects <- meffil.qc(anno,
 
 #in any bioinformatic process, it is good practice to append saved files with
 #details of the sample numbers, cohort name, functions applied, etc.
-saveRDS(qc.objects, file = file.path("meffil_sing/qc.objects.rds"))
-qc.objects <- readRDS("meffil_sing/qc.objects.rds")
+saveRDS(qc.objects, file = file.path(paste0(batchdir,"/qc.objects.rds")))
+qc.objects <- readRDS(paste0(batchdir,"/qc.objects.rds"))
 gc()
 
 # #use this code if error results from 'meffil.qc'
@@ -91,16 +96,16 @@ gc()
 
 #QC analysis of the raw data
 qc.summary <- meffil.qc.summary(qc.objects)
-saveRDS(qc.summary, file = file.path("meffil_sing/qc.summary.rds"))
-qc.summary <- readRDS("meffil_sing/qc.summary.rds")
+saveRDS(qc.summary, file = file.path(paste0(batchdir,"/qc.summary.rds")))
+qc.summary <- readRDS(paste0(batchdir,"/qc.summary.rds"))
 
 #extract bad cpgs from qc.summary
 bad.cpgs <- qc.summary$bad.cpgs$name
-saveRDS(bad.cpgs, file = file.path("meffil_sing/bad.cpgs.rds"))
-bad.cpgs <- readRDS("meffil_sing/bad.cpgs.rds")
+saveRDS(bad.cpgs, file = file.path(paste0(batchdir,"/bad.cpgs.rds")))
+bad.cpgs <- readRDS(paste0(batchdir,"/bad.cpgs.rds"))
 
 #create html-based report of qc results
-meffil.qc.report(qc.summary, output.file="meffil_sing/qc_report.html")
+meffil.qc.report(qc.summary, output.file=paste0(batchdir,"/qc_report.html"))
 
 
 #this section outlines what I consider to be the important qc checks for sample quality
@@ -142,7 +147,9 @@ qc.objects <- meffil.remove.samples(qc.objects, bad_samples)
 #plots the quantile residuals remaining after fitting different numbers of control matrix principal components
 #I use the 'elbow' to determine the optimal number of pcs
 pc.fit <- meffil.plot.pc.fit(qc.objects)
+setwd(batchdir)
 print(pc.fit$plot)
+setwd("/data/MDATA")
 pc <- 8
 gc()
 
@@ -154,12 +161,12 @@ norm.objects <- meffil.normalize.quantiles(qc.objects,
                                            number.pcs=pc,
                                            verbose = TRUE)
 
-saveRDS(norm.objects, file = file.path("meffil_sing/norm.objects_pc8_fixedeffectsMaterial.rds"))
-norm.objects <- readRDS("meffil_sing/norm.objects_pc8_fixedeffectsMaterial.rds")
+saveRDS(norm.objects, file = file.path(paste0(batchdir,"/norm.objects_pc8_fixedeffectsMaterial.rds")))
+norm.objects <- readRDS(paste0(batchdir,"/norm.objects_pc8_fixedeffectsMaterial.rds"))
 gc()
 
 #remove objects not needed for further analysis (i.e. free up memory)
-rm(list=setdiff(ls(), c("norm.objects", "bad.cpgs", "cores")))
+rm(list=setdiff(ls(), c("norm.objects", "bad.cpgs", "cores", "batchdir", "samplesheet")))
 gc()
 
 #normalize samples using their normalized quality control objects and remove bad CpGs (from the QC analysis)
@@ -168,8 +175,8 @@ norm.beta <- meffil.normalize.samples(norm.objects,
                                          cpglist.remove = bad.cpgs,
                                          verbose = TRUE)
 
-saveRDS(norm.beta, file = file.path("meffil_sing/norm.betas.rds")) ## Original saveRDS(norm.signals, file = file.path("meffil_output/norm.signals.rds")) 
-norm.beta <- readRDS("meffil_sing/norm.betas.rds")
+saveRDS(norm.beta, file = file.path(paste0(batchdir,"/norm.betas.rds"))); ## Original saveRDS(norm.signals, file = file.path("meffil_output/norm.signals.rds")) 
+norm.beta <- readRDS(paste0(batchdir,"/norm.betas.rds"))
 
 #convert normalized signals to beta values (if 'just.beta' = F)
 #beta <- meffil.get.beta(norm.signals$M, norm.signals$U, pseudo = 100)
@@ -177,7 +184,7 @@ beta <- as.data.frame(norm.beta)
 rm(norm.beta)
 gc()
 
-fwrite(beta, "meffil_sing/betas_pc8_fixedeffectsMaterial.txt", 
+fwrite(beta, paste0(batchdir,"/betas_pc8_fixedeffectsMaterial.txt"), 
        row.names=TRUE, sep = "\t")
 
 ## summary report of the normalization performance
@@ -187,18 +194,15 @@ fwrite(beta, "meffil_sing/betas_pc8_fixedeffectsMaterial.txt",
 
 #####################################################
 ######## Make dimension reduction with UWOT  ########
-
 anno <- openxlsx::read.xlsx("NormRcode/Sample_sheet_test.xlsx")
 
 PC <- prcomp(t(beta), center = TRUE, scale = FALSE) 
-saveRDS(PC, "meffil_sing/pc_prcomp_puritycorrected.rds")
-PC <- readRDS("meffil_sing/pc_prcomp_puritycorrected.rds")
+saveRDS(PC, paste0(batchdir,"/pc_prcomp_puritycorrected.rds"))
+PC <- readRDS(paste0(batchdir,"/pc_prcomp_puritycorrected.rds"))
 
-
-
-#supervised dimensionality reduction with UMAP
+#unsupervised dimensionality reduction with UMAP
 umap <- uwot::umap(PC$x,
-                   n_components = 3,
+                   #n_components = 3,
                    #pca = 100,
                    n_neighbors = 5,
                    #y = anno$Combined_class_match,
@@ -210,7 +214,7 @@ umap <- uwot::umap(PC$x,
 umap <- as.data.frame(umap)
 rownames(umap) <- rownames(PC$x)
 umap <- umap %>% rownames_to_column("idat_filename")
-anno <- anno[anno$idat_filename %in% umap(PC$x),]
+anno <- anno[anno$idat_filename %in% umap$idat_filename,]
 
 outf <- merge(umap, anno[,c(
     "idat_filename",
@@ -237,13 +241,15 @@ outf <- merge(umap, anno[,c(
 	"fusion_matches",
 	"breakpoint_genes",
 	"amplifications",
-	"deletions","Likely_integrated_diagnosis")],
+	"deletions",
+	"Likely_integrated_diagnosis")],
     by = "idat_filename");
 
-fwrite(beta, "meffil_sing/umap_1.txt", 
+fwrite(beta, paste0(batchdir,"/umap_1.txt"), 
     row.names=TRUE, sep = "\t");
 
-Sys.time();
-print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", quote=F);
-print(" End of normalization and UMAP script ", quote=F);
-print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", quote=F);
+file.rename(samplesheet, gsub(".xlsx",  ".done.xlsx", samplesheet));
+message(Sys.time());
+message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+message(" End of normalization and UMAP script ");
+message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
