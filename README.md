@@ -21,7 +21,7 @@ All idat files will go to single directory duplicated or pre-existed idat files 
 *Script for zipping and transfering copy of \*.idat files from TRANSFER folder to major pool folder. This script is also updating master database (thi big excel file) with metadata this excel is used in normalization script late.
 
 #### norm.sh
-*Wrapper for* **normalization.R**. * This code will go over Drew's pipeline and generates Umap files for R-Shiny ingestion. 
+*Biowulf slurrm job wrapper for* **normalization.R**. * This R code will go over Drew's pipeline (minor modification) and generates Umap files for R-Shiny ingestion. QC report and automated filtering will be saved in TRANSFER/project dir.
 
 ----
 
