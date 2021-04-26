@@ -1,0 +1,19 @@
+{
+  "compoundQuery": {
+      "operator": "OR",
+      "queries": [
+	 {
+	     "attribute": "object_name",
+	     "value": "%.idat",
+	     "operator": "LIKE"
+	 },
+	 {
+	      "attribute":"object_name",
+	      "value":"Sample_Sheet_batch.xlsx",
+	      "operator":"EQUAL"
+	  }
+      ]
+   },
+   "page": 1,
+   "totalCount": true
+}
