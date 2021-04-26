@@ -25,9 +25,9 @@ All idat files will go to single directory duplicated or pre-existed idat files 
 
 ----
 
-### Script order
+### Scripts order to run
 
-*  dme2biowulf.sync.pl (No special requarements on machine configuration)
-*  topup_anno.R   (R environment, or singularity with rbox_v0.sif) 
-*  normalization.R  ( singularity with rbox_v0.sif otherwise install bunch of R packages)
+*  dme2biowulf.sync.pl ( No special requarements on machine configuration )
+*  topup_anno.R        ( R environment, or singularity with rbox_v0.sif ) 
+*  normalization.R     ( singularity with rbox_v0.sif otherwise install bunch of R packages )
 
