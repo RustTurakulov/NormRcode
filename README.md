@@ -36,3 +36,4 @@ All idat files will go to single directory duplicated or pre-existed idat files 
 *  normalization.R     ( singularity with rbox_v0.sif otherwise install bunch of R packages )
    **sbatch NormRcode/norm.sh compass_2021-04-27.xlsx**
 
+
