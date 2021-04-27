@@ -15,8 +15,9 @@ newfolder  <- paste0("/data/MDATA/TRANSFER/", sourcedir );
 samplesout <- paste0("/data/MDATA/TRANSFER/SAMPLESHEETS/", sourcedir, "_", Sys.Date(), ".xlsx" );
 bigpooldir <- "/data/MDATA/idat";
 
-# find specific samplesheet files with new data, parsing data only with filled Sample.name
-samplesheet   <- list.files(newfolder, "Sample_Sheet_batch.xlsx$");
+# Use concatenated Sample_Sheet.xlsx to find files with new data, parsing data only with filled Sample.name
+#samplesheet   <- list.files(newfolder, "Sample_Sheet.xlsx$"); ## This will be list of files
+samplesheet   <- "Sample_Sheet.xlsx";
 newidatlist   <- list.files(newfolder, pattern = ".idat$|.idat.gz$");
 anno_base     <- openxlsx::read.xlsx("/data/MDATA/NormRcode/Sample_sheet_test.xlsx");
 newbatch_anno <- openxlsx::read.xlsx(paste0(newfolder, "/", samplesheet));
@@ -39,7 +40,7 @@ for(sample in newbatch_anno[,1]) {
 				  file.copy(paste0("cp -nv ",newfolder,"/",idatfile," ", bigpooldir));
 			  }else{
 				  message(idatfile, ": GZip and transfer");  
-				  system(paste0("gzip -k ",newfolder,"/",idatfile," && mv -v ", newfolder,"/",idatfile, ".gz ", bigpooldir))
+				  system(paste0("pigz -k ",newfolder,"/",idatfile," && mv -v ", newfolder,"/",idatfile, ".gz ", bigpooldir))
 			  } 
 	     }
 	  }
@@ -49,9 +50,10 @@ message("~~~~ Adding new files metadata to the master spreadsheet ~~~~");
 # Appending master spreadsheet of centrixpool with new batch samples
 centrixpool = anno_base$idat_filename ;
 nn <- length(centrixpool);
+#(newbatch_anno[newbatch_anno$Sentrix.id=="202816900038_R04C01",1:6])
 
-for(sample in newbatch_anno[,1]) {
-	 centrix  = newbatch_anno[newbatch_anno[,1]==sample, 2] ;
+for(centrix in newbatch_anno[,2]) {
+	 sample = newbatch_anno[newbatch_anno[,2]==centrix, 1] ;
 	 options(warn=-1);
      if (grepl(centrix, centrixpool)){
 		 message(centrix, ":        has record in master file");

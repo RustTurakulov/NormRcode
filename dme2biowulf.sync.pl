@@ -39,8 +39,8 @@ $ENV{https_proxy}  = "http://dtn01-e0:3128";
 
 
 ## Setting output and config files
-#my $dmepath  = "LP_COMPASS_Archive/PI_Kenneth_Aldape/Project_Methylation/Sentrix_"; #6.5K files 
-my $dmepath = "LP_COMPASS_Archive/PI_Kenneth_Aldape/Project_Methylation/Sentrix_202827620074";
+my $dmepath  = "LP_COMPASS_Archive/PI_Kenneth_Aldape/Project_Methylation/Sentrix_"; #6.5K files 
+#my $dmepath = "LP_COMPASS_Archive/PI_Kenneth_Aldape/Project_Methylation/Sentrix_202827620074";
 my $fnmlist = "TRANSFER/dme_methylation_list.txt";
 my $jsndump = "TRANSFER/dme_methylation_list.json";
 my $jsncnfg = "NormRcode/methylation.json";
@@ -49,7 +49,7 @@ my $bigexcelfile = "$destination/Sample_Sheet.xlsx";
 
 ### Stage 1.  Collect and parse metadata from DME with API
 ### Parse first page of files (there is limit of 100 files) to save.   
-print "\nLaunching metadata dump from DME\n";
+print "\nLaunching metadata dump from DME:\n\n";
 print("dm_query_dataobject -D $fnmlist -o $jsndump $jsncnfg $dmepath\n\n");
 system("dm_query_dataobject -D $fnmlist -o $jsndump $jsncnfg $dmepath");
 
@@ -202,12 +202,13 @@ for my $xlf (@excelfiles)
  print "\n$excelfile";  
  my $book = ReadData($excelfile);
  my @extradata = Spreadsheet::Read::rows($book->[1]) ;
-	foreach my $i (2 .. scalar @extradata) {                    ## 2 <- No header needed
+	foreach my $i (2 .. scalar @extradata) {                     ## 2 <- No header is needed
 		my @row=();
-		foreach my $j (1 .. 9) {   ## scalar @{$extradata[$i-1]} ## if full line is needed
+		foreach my $j (1 .. 9) {   ## scalar @{$extradata[$i-1]} ## if full line is needed: there is some useless stuff after column 10  
 			push @row, $extradata[$i-1][$j-1] ;
 		}
-		my $line = join "\t", @row;
+#		my $line = join "\t", @row;  this generates warning messages.
+		my $line = join( "\t", map { defined ? $_ : '' } @row );
         push @data, $line;
 	}
 };
@@ -215,14 +216,12 @@ for my $xlf (@excelfiles)
 ## Dump concatenated array to Excel file
 my $workbook = Excel::Writer::XLSX->new("$bigexcelfile");
 my $worksheet = $workbook->add_worksheet();
-$worksheet->write( "A1", "Hi Excel!" );
-$worksheet->write( "A2", "second row" );
 my $firstline = 1;
 my ($x,$y) = (1,0);
 foreach my $line (@data)
 {
   chomp $line;
-  if ($firstline eq 1) # Header Lines
+  if ($firstline eq 1) # Header Lines replace "X"
   {
     $firstline++;
     $worksheet->write( 0, 0, "Sample name" );
@@ -247,8 +246,7 @@ foreach my $line (@data)
 } 
 $workbook->close;
 
-
-
+print "\n~~~~~~~~~~~~~~~\n   The  end.  \n~~~~~~~~~~~~~~~\n"; 
 
 
 ## Not very useful piece
