@@ -57,8 +57,11 @@ anno <- anno %>% filter(!duplicated(Basename))
 
 #define number of cores for parallelization (linux-based machines)
 #code for parallel implcd ..ementation on windows-based machines is different
-options(mc.cores=26)
+#options(mc.cores=26)
+options(mc.cores=1)
+
 cores <- options()$mc.cores
+
 
 # #list of available chips and feature sets for meffil
 # meffil.list.chips()
