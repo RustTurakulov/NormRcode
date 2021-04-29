@@ -1,11 +1,9 @@
 #!/bin/sh
-##SBATCH --exclusive \
-##SBATCH --ntasks=28 \
+#SBATCH --exclusive \
+#SBATCH --ntasks=28 \
 #SBATCH --ntasks=1 \
-##SBATCH --mem=247g \
-#SBATCH --mem=120g \
-#SBATCH --ntasks-per-core=1 \
-##SBATCH --ntasks-per-core=28 \
+#SBATCH --mem=247g \
+#SBATCH --ntasks-per-core=28 \
 #SBATCH --ntasks-per-core=1 \
 #SBATCH --gres=lscratch:100 \
 #SBATCH --time 24:00:00
@@ -15,8 +13,7 @@
 
 cd /data/MDATA
 export TMPDIR=/lscratch/$SLURM_JOB_ID
-export SINGULARITYENV_THREADS=1
-#export SINGULARITYENV_THREADS=26
+export SINGULARITYENV_THREADS=26
 gpfs_dirs="$(echo /gs* | tr ' ' ',')"
 export SINGULARITY_BINDPATH="/vf,${gpfs_dirs},/spin1,/data,/lscratch,/scratch,/fdb"
 module load singularity
