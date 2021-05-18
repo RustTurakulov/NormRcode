@@ -34,6 +34,18 @@ All idat files will go to single directory duplicated or pre-existed idat files 
    **Rscript   NormRcode/topup_anno.R compass**
    
 *  normalization.R     ( singularity with rbox_v0.sif otherwise install bunch of R packages )
-   **sbatch NormRcode/norm.sh compass_2021-04-27.xlsx**
+   **sbatch NormRcode/norm.sh  
+   at this stage it takes all new new files from compass folder (which are not included in major reference set) and  run **normalization.R** no input samplessheet is requared it will be generated on fly data spilled to /mdata/TRANSFER/compass.
+
+----
+### Container with preinstalled Methylation packages and RShiny 
+
+RBOX with methylation libraries for normalization and annotation:
+
+' https://hub.docker.com/repository/docker/trust1/rbox '   
+
+RShiny (based on "rocker" container):
+
+' https://hub.docker.com/repository/docker/trust1/shiny '
 
 
