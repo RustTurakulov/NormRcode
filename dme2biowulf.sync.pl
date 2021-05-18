@@ -43,9 +43,9 @@ my $dmepath  = "LP_COMPASS_Archive/PI_Kenneth_Aldape/Project_Methylation/Sentrix
 #my $dmepath = "LP_COMPASS_Archive/PI_Kenneth_Aldape/Project_Methylation/Sentrix_202827620074";
 my $fnmlist = "TRANSFER/dme_methylation_list.txt";
 my $jsndump = "TRANSFER/dme_methylation_list.json";
-my $jsncnfg = "NormRcode/methylation.json";
-my $destination  = "TRANSFER/compass" ;
-my $bigexcelfile = "$destination/Sample_Sheet.xlsx";
+my $jsncnfg = "NormRcode/methylation.ss.json";        # pull only files from 2021 
+my $destination  = "TRANSFER/compass" ;               # ad as vaiable later
+my $bigexcelfile = "$destination/Sample_Sheet.xlsx";  # concatenated samplesheets
 
 ### Stage 1.  Collect and parse metadata from DME with API
 ### Parse first page of files (there is limit of 100 files) to save.   
@@ -56,7 +56,7 @@ system("dm_query_dataobject -D $fnmlist -o $jsndump $jsncnfg $dmepath");
 my @ALLFILES;
 my @JASON = `cat NormRcode/methylation.json`;    
 my @PAGE  = `cat TRANSFER/dme_methylation_list.json`;
-my $limit =0;
+my $limit = 0;
 my $totalCount =0;
 foreach my $line (@PAGE) {
 	chomp $line;
@@ -101,7 +101,7 @@ for ($curentpage .. $lastpage) {
     };
 };
 #Putting page counter back to page 1
-open JASON, ">NormRcode/methylation.json";
+open JASON, ">NormRcode/methylation.ss.json";
 foreach my $jline (@JASON) {
 	if ($jline =~ m/ \"page\":/g) {
 		print JASON "   \"page\": $curentpage,\n";
@@ -138,7 +138,7 @@ close FULLIST;
 
 ### Stage 2. Collect hash of centrix existed in mastersheet 
 my %bookcentrix = ();
-my $book = ReadData('NormRcode/Sample_sheet_test.xlsx');
+my $book = ReadData('NormRcode/Sample_sheet.xlsx');
 my @rows = Spreadsheet::Read::rows($book->[1]);
 foreach my $i (1 .. $#rows) {
 	my $dnaid   = $rows[$i][1];

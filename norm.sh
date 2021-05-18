@@ -1,11 +1,9 @@
 #!/bin/sh
 #SBATCH --exclusive \
 #SBATCH --ntasks=28 \
-#SBATCH --ntasks=1 \
 #SBATCH --mem=247g \
-#SBATCH --ntasks-per-core=28 \
 #SBATCH --ntasks-per-core=1 \
-#SBATCH --gres=lscratch:100 \
+#SBATCH --gres=lscratch:200 \
 #SBATCH --time 24:00:00
 
 ## Sbatch for running Drew's normalization protocol for idat 

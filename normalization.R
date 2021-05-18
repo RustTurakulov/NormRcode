@@ -1,3 +1,4 @@
+options(scipen = 999)
 library(data.table)
 library(parallel)
 library(tidyr)
@@ -12,195 +13,272 @@ library(Rtsne)
 library(gridExtra)
 library(tidyverse)
 library(densvis)
+library(data.table)
 
-# parsing folder locations  
-args = commandArgs(trailingOnly=TRUE)
-samplesheet <- args[1];
-batchdir    <- sub("(_20[0-9][0-9]-[01][0-9]-[0-9][0-9].xlsx)", "", samplesheet, perl=T);
-batchdir    <- paste0("TRANSFER/SAMPLESHEETS/", batchdir);
-samplesheet <- paste0("TRANSFER/SAMPLESHEETS/", samplesheet);
-dir.create(batchdir);
+options(mc.cores=70)
+cores <- options()$mc.cores
 
-#create sample sheet
-#anno_base <- openxlsx::read.xlsx("NormRcode/Sample_sheet_test.xlsx")
+## compass dir
+idatrootfolder = "compass/iScan_raw/";
+batchdir      <- "NormRcode/CNS13Krefset/"; 
+batchdirout   <- "TRANSFER/SAMPLESHEETS/compass"; 
+samplesheet   <- "NormRcode/CNS13Krefset/Compass_13K.xlsx";
+
+#############  Injest static samplesheet
+### Part 0 ##  anno_base -- rich file
+#############  anno -- minimal for meffil 
+
 anno_base <- openxlsx::read.xlsx(samplesheet)
-
-#filter cases based on string 
-#(in this case, we are interested in all non-duplicate cases)
-#use 'unique(anno_base$panCNS_study)' to see choices
-anno <- anno_base %>% filter(panCNS_study=="Case" |
-                               panCNS_study=="Recurrent_nonmatched" |
-                               panCNS_study=="Recurrent_matched" |
-                               panCNS_study=="Metastasis_matched" |
-                               panCNS_study=="Metastasis_nonmatched" |
-                               panCNS_study=="Non_neoplastic_bulk" |
-                               panCNS_study=="Case_nonCNS")
-
-#other filtering options
-#anno <- anno_base[!is.na(anno_base$Purity_known_class) | grepl("CELLS",anno_base$Purity_cell),]
-#anno <- anno_base %>% filter(!is.na(Purity_study))
-
-#format sample sheet for meffil
-anno <- anno[,c( "idat_filename", "Sex", "Sentrix_ID", "Sentrix_position", "Basename_Ubuntu","Platform_methy","material_prediction")]
+anno <- anno_base %>% filter( CNS_study == "Case" );
+anno <- anno[,c( "idat_filename", "Sex", "Sentrix_ID", "Sentrix_position", "Platform_methy","material_prediction")];
+anno$Basename <- paste0("idat/", anno$idat_filename);
+anno$material_prediction[anno$material_prediction!="FFPE"]<-"Frozen";
+anno$Sex = gsub("FEMALE", "F", toupper(anno$Sex));
+anno$Sex = gsub("MALE",   "M", toupper(anno$Sex));
+anno$Sex[!(anno$Sex %in% c("M","F"))]<- NA;
 anno <- separate(anno, Sentrix_position, into = c("sentrix_row", "sentrix_col"), sep = 3, remove = TRUE)
 anno$sentrix_row = gsub("\\R","",anno$sentrix_row)
 anno$sentrix_col = gsub("\\C","",anno$sentrix_col)
-names(anno) <- c("Sample_Name", "Sex", "Slide", "sentrix_row", "sentrix_col", "Basename", "Array", "Material")
+names(anno) <- c("Sample_Name", "Sex", "Slide", "sentrix_row", "sentrix_col", "Array", "Material", "Basename");
 anno$Slide <- as.numeric(as.character(anno$Slide))
 anno <- anno %>% filter(!is.na(Basename))
 anno <- anno %>% filter(!duplicated(Basename))
-#anno <- anno %>% filter(Array=="HumanMethylationEPIC")
-
-# #for copy number only
-# anno_450k <- anno %>% filter(Array == "HumanMethylation450")
-# anno_EPIC <- anno %>% filter(Array == "HumanMethylationEPIC")
-
-#define number of cores for parallelization (linux-based machines)
-#code for parallel implcd ..ementation on windows-based machines is different
-#options(mc.cores=26)
-options(mc.cores=1)
-
-cores <- options()$mc.cores
 
 
-# #list of available chips and feature sets for meffil
-# meffil.list.chips()
-# meffil.list.featuresets()
-# 
-# #list of available cell type references
-# meffil.list.cell.type.references()
+#############  Collect new samples from
+### Part 1 ##  compass    
+#############
 
-#qc object: perform background correction, dye bias correction, sex prediction and cell count estimates
-qc.objects <- meffil.qc(anno, 
-                        featureset = "common", 
-                        cell.type.reference = NA, 
-                        verbose = T)
 
-#in any bioinformatic process, it is good practice to append saved files with
-#details of the sample numbers, cohort name, functions applied, etc.
-saveRDS(qc.objects, file = file.path(paste0(batchdir,"/qc.objects.rds")))
-qc.objects <- readRDS(paste0(batchdir,"/qc.objects.rds"))
+compdirs  <- list.files(idatrootfolder, pattern = "^[0-9]+");
+newdirs   <- setdiff(compdirs, anno$Slide)
+
+nn = 0; 
+kk = 0;
+
+newsamplesheet = c();
+for(centrix in newdirs){
+   nn     = nn+1 
+   Sample = c(); 
+   idat_filename =c();
+   idat   = c();
+   Sentrix_ID = c();
+   Sentrix_position = c();
+   material_prediction  = c();
+   Platform_methy = c();
+   Age = c();
+   Sex = c();
+   matched_cases = c();
+   Location_general = c();
+   Location_specific = c();
+   Neoplastic = c();
+   Primary_category = c();
+   CNS_study = c();
+   OS_months = c();
+   OS_status = c();
+   PFS_months = c();
+   PFS_status = c();
+   Histology = c();
+   Molecular = c();
+   Study = c();
+   predFFPE = c();
+   CNS.MCF = c();
+   CNS.MCF.score = c();
+   CNS.Subclass = c();
+   CNS.Subclass.score = c();
+   RFpurity.ABSOLUTE = c();
+   RFpurity.ESTIMATE = c();
+   LUMP = c();
+   knnsheet <- paste0(idatrootfolder, centrix, "/", centrix,"_KNN.combined.csv");
+   if(file.exists(knnsheet)){
+	   kk = kk +1;
+       rawsheet  <- read.csv(knnsheet, row.names=1);
+		 Sample               = rawsheet[,grep('SAMPLE_NAME', names(rawsheet), ignore.case = T, perl = T)];
+		 idat_filename        = rawsheet[,which( names(rawsheet) == 'ID')];
+		 idat                 = idat_filename;
+		 Sentrix_ID           = rawsheet[,grep('SENTRIX_ID', names(rawsheet), ignore.case = T, perl = T)];
+		 Sentrix_position     = rawsheet[,grep('SENTRIX_POSITION', names(rawsheet), ignore.case = T, perl = T)];
+		 material_prediction  = rawsheet[,grep('PREDFFPE', names(rawsheet), ignore.case = T, perl = T)];
+		 Platform_methy       = rawsheet[,grep('SAMPLE_GROUP', names(rawsheet), ignore.case = T, perl = T)];
+           Platform_methy     = replace(Platform_methy, grep('EPIC', Platform_methy, ignore.case = T), "HumanMethylationEPIC");
+           Platform_methy     = replace(Platform_methy, grep('450', Platform_methy, ignore.case = T, perl = T), "HumanMethylation450");
+		 Age                  = rawsheet[,grep('AGE', names(rawsheet), ignore.case = T, perl = T)];
+           Age                = replace(Age, grep("\\D", Age), NA);
+		 Sex                  = rawsheet[,grep('GENDER|SEX', names(rawsheet), ignore.case = T, perl = T)];
+           Sex                = replace(Sex, grep("FEMALE",  Sex, ignore.case = T, perl = T), "F" );
+           Sex                = replace(Sex, grep("MALE",    Sex, ignore.case = T, perl = T), "M" );
+           Sex                = replace(Sex, grep("unknown", Sex, ignore.case = T, perl = T),  NA );
+		 matched_cases        = rawsheet[,grep('NEARESTNEIGHBOR', names(rawsheet), ignore.case = T, perl = T)];
+		 Location_general     = rawsheet[,grep('TUMOR_SITE',      names(rawsheet), ignore.case = T, perl = T)];
+		 Location_specific    = rawsheet[,grep('SURGICAL_CASE',   names(rawsheet), ignore.case = T, perl = T)];
+		 Neoplastic           = rep("Neuropathology", nrow(rawsheet));
+		 Primary_category     = rep("Case",           nrow(rawsheet));
+		 CNS_study            = rep("Case",           nrow(rawsheet));
+		 OS_months            = rep(NA,               nrow(rawsheet));
+		 OS_status            = rep(NA,               nrow(rawsheet));
+		 PFS_months           = rep(NA,               nrow(rawsheet));
+		 PFS_status           = rep(NA,               nrow(rawsheet));
+		 Histology            = rawsheet[,grep('DIAGNOSIS', names(rawsheet), ignore.case = T, perl = T)];
+		 Molecular            = rawsheet[,grep('NOTES',     names(rawsheet), ignore.case = T, perl = T)];
+		 Study                = rep("compass",        nrow(rawsheet));
+		 predFFPE             = rawsheet[,grep('MATERIAL_TYPE',     names(rawsheet), ignore.case = T, perl = T)];
+		 CNS.MCF              = rawsheet[,which( names(rawsheet) == 'MCF1')]; 
+		 CNS.MCF.score        = rawsheet[,grep('MCF1.SCORE',        names(rawsheet), ignore.case = T)];
+		 CNS.Subclass         = rawsheet[,which( names(rawsheet) == 'Class1')]; 
+		 CNS.Subclass.score   = rawsheet[,grep('CLASS1.SCORE',      names(rawsheet), ignore.case = T)];
+		 RFpurity.ABSOLUTE    = rawsheet[,grep('RFPURITY.ABSOLUTE', names(rawsheet), ignore.case = T, perl = T)];
+		 RFpurity.ESTIMATE    = rawsheet[,grep('RFPURITY.ESTIMATE', names(rawsheet), ignore.case = T, perl = T)];
+		 LUMP                 = rawsheet[,grep('LUMP',              names(rawsheet), ignore.case = T, perl = T)];           
+		 Basename             = rawsheet$Basename;
+		 reshaped = data.frame(nn = nn, Sample = Sample, idat_filename = idat_filename, idat = idat, Sentrix_ID = Sentrix_ID, 
+                        Sentrix_position = Sentrix_position, material_prediction = material_prediction, Platform_methy = Platform_methy,
+                        Age = Age, Sex = Sex, matched_cases = matched_cases,  Location_general = Location_general, Location_specific = Location_specific,
+			            Neoplastic = Neoplastic, Primary_category = Primary_category, CNS_study = CNS_study, OS_months = OS_months, OS_status = OS_status,
+                        PFS_months = PFS_months, PFS_status, Histology = Histology, Molecular = Molecular, Study = Study, predFFPE = predFFPE, CNS.MCF = CNS.MCF,
+                        CNS.MCF.score = CNS.MCF.score, CNS.Subclass = CNS.Subclass, CNS.Subclass.score = CNS.Subclass.score, RFpurity.ABSOLUTE = RFpurity.ABSOLUTE,
+                        RFpurity.ESTIMATE = RFpurity.ESTIMATE, LUMP = LUMP, Basename = Basename );
+        
+		 newsamplesheet = rbind( newsamplesheet , reshaped );
+
+		 message(centrix, " : has ", nrow(reshaped), " samples in samplesheet");
+   }else{
+	   message(knnsheet, " : is not here");
+   }
+};
+
+## Putting both sampleshhets together without Basename column 
+combo_samplesheet <- rbind(newsamplesheet[,-32], anno_base);
+fwrite(combo_samplesheet, file.path(batchdirout, "combo_samplesheet.tsv"),
+       sep = "\t", row.names = TRUE,  nThread = cores);
+
+message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n  ", 
+        nn, "\t-- chips processed\n  ", 
+		kk, "\t-- with CNS sample sheets\n ", 
+        nrow(newsamplesheet),"\t-- new samples collected\n",
+		"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+
+## Reshaping of reshaped new annotation for meffil
+new_anno <- newsamplesheet %>% filter( CNS_study == "Case" );
+new_anno <- new_anno[,c( "idat_filename", "Sex", "Sentrix_ID", "Sentrix_position", "Platform_methy","material_prediction", "Basename")];
+new_anno$material_prediction[new_anno$material_prediction!="FFPE"]<-"Frozen";
+new_anno$Sex[!(new_anno$Sex %in% c("M","F"))]<- NA;
+new_anno <- separate(new_anno, Sentrix_position, into = c("sentrix_row", "sentrix_col"), sep = 3, remove = TRUE)
+new_anno$sentrix_row = gsub("\\R","",new_anno$sentrix_row)
+new_anno$sentrix_col = gsub("\\C","",new_anno$sentrix_col)
+names(new_anno) <- c("Sample_Name", "Sex", "Slide", "sentrix_row", "sentrix_col", "Array", "Material", "Basename");
+new_anno$Slide <- as.numeric(as.character(new_anno$Slide))
+new_anno <- new_anno %>% filter(!is.na(Basename))
+new_anno <- new_anno %>% filter(!duplicated(Basename))
+
+
+#############  Quantile normalization 
+### Part 2 ##  https://github.com/perishky/meffil/wiki/Functional-normalizing-separate-datasets   
+#############  One of the slowest part ~ 3hrs for 13K for new set 100 samples ~20-40min
+message("\nPart 2. ", Sys.time(), "\nBackground correction: meffil.qc ...\n");
+
+#new.qc.objects <- meffil.qc(new_anno, 
+#                          featureset = "common", 
+#                          cell.type.reference = NA, 
+#                          verbose = T)
+#saveRDS(new.qc.objects, file = file.path(batchdirout,"/new.qc.objects.rds"))
+new.qc.objects   <-    readRDS(file.path(batchdirout,"/new.qc.objects.rds"))
 gc()
 
-# #use this code if error results from 'meffil.qc'
-# #in my experience, this occurs in two situations: missing idat file(s) in folder
-# #and incompatible idat file
-# qc.objects_error <- qc.objects[which(sapply(qc.objects, class) == 'try-error')]
-# qc.objects_error <- as.data.frame(do.call(c, qc.objects_error))
-# write.table(qc.objects_error, "meffil_output/error.txt", sep = "\t")
+## Read major reference set 13K samples
+qc.objects <- readRDS(paste0(batchdir,"/qc.objects.13K.rds"))
 
-# #Obtain the matrix of genotypes for comparison with those measured on the microarray
-# annotation <- qc.objects[[1]]$featureset
-# writeLines(meffil.snp.names(annotation), con="snp-names.txt")
-# #command shell > ./plink2 --bfile dataset --extract snp-names.txt --recode A --out genotypes
-# filenames <- "genotypes.raw"
-# genotypes <- meffil.extract.genotypes(filenames)
+## Pick some random 1K samples from reference set and combine two sets for normalization 
+##combo.qc.objects   <- c(new.qc.objects, qc.objects[sample(1:length(names(qc.objects)), 1000, replace=T)]);
+combo.qc.objects <- c(new.qc.objects, qc.objects);
 
-#QC analysis of the raw data
-qc.summary <- meffil.qc.summary(qc.objects)
-saveRDS(qc.summary, file = file.path(paste0(batchdir,"/qc.summary.rds")))
-qc.summary <- readRDS(paste0(batchdir,"/qc.summary.rds"))
+combo.norm.objects <- meffil.normalize.quantiles(combo.qc.objects,
+                       fixed.effects  = c("Material", "Array"), verbose = TRUE, 
+                       random.effects = "Slide",    ## you are looking for trouble: on 13K set
+                       number.pcs = 5 );           ## 23 may be too much
 
-#extract bad cpgs from qc.summary
-bad.cpgs <- qc.summary$bad.cpgs$name
-saveRDS(bad.cpgs, file = file.path(paste0(batchdir,"/bad.cpgs.rds")))
-bad.cpgs <- readRDS(paste0(batchdir,"/bad.cpgs.rds"))
+black.cpgs    <- readRDS(paste0(batchdir,"/black.cpgs.rds"))
+# Generating normalized reference beta to the number of PCA (#5 from step above) for later reuse with new batches. 
+# Subsetting it back to reference data only (for number.pcs) checks (PC on ref has to be match with new batch)
+ref.norm.objects <- combo.norm.objects[names(combo.norm.objects) %in% names(qc.objects)]
+ref.norm.beta <- meffil.normalize.samples(ref.norm.objects ,
+                                       just.beta = T,
+                                       cpglist.remove = black.cpgs,
+                                       verbose = TRUE)
+saveRDS(ref.norm.beta, file = file.path(batchdir,"/norm.betas5se.rds"))
+ref.norm.betas <- readRDS(paste0(batchdir,"/norm.betas5se.rds"))
 
-#create html-based report of qc results
-meffil.qc.report(qc.summary, output.file=paste0(batchdir,"/qc_report.html"))
+# Subsetting it back to new data only 
+new.norm.objects <- combo.norm.objects[names(combo.norm.objects) %in% names(new.qc.objects)]
+new.norm.beta <- meffil.normalize.samples(new.norm.objects ,
+                                       just.beta = T,
+                                       cpglist.remove = black.cpgs,
+                                       verbose = TRUE)
 
 
-#this section outlines what I consider to be the important qc checks for sample quality
-#outlier samples whose predicted median methylated signal is more than 3 standard deviations from the expected
-bad_samples_meth_unmeth <- as.data.frame(qc.summary$meth.unmeth.summary$tab)
-bad_samples_meth_unmeth <- bad_samples_meth_unmeth[bad_samples_meth_unmeth$outliers==TRUE,]
-anno_bad_meth_unmeth <- anno_base[anno_base$idat_filename %in% bad_samples_meth_unmeth$sample.name,]
+saveRDS(new.norm.beta, file = file.path(batchdirout,"/new.norm.beta5se.rds"))
+new.norm.beta  <- readRDS(paste0(batchdirout,"/new.norm.beta5se.rds"))
 
-# #remove specific samples
-# bad_samples_meth_unmeth <- bad_samples_meth_unmeth[!bad_samples_meth_unmeth$sample.name=="GSM2403462_8622007027_R02C01",]
-
-#deviations from mean values for control probes
-bad_samples_control <- as.data.frame(qc.summary$controlmeans.summary$tab)
-bad_samples_control <- bad_samples_control[bad_samples_control$outliers==TRUE,]
-bad_samples_control <- bad_samples_control[bad_samples_control$variable=="bisulfite1" | bad_samples_control$variable=="bisulfite2",]
-anno_bad_control <- anno_base[anno_base$idat_filename %in% bad_samples_control$sample.name,]
-
-#samples with proportion of probes with detection p-value > 0.01 is > 0.2
-bad_samples_detectionp <- as.data.frame(qc.summary$sample.detectionp.summary$tab)
-bad_samples_detectionp <- bad_samples_detectionp[bad_samples_detectionp$outliers==TRUE,]
-anno_bad_detectionp <- anno_base[anno_base$idat_filename %in% bad_samples_detectionp$sample.name,]
-
-#smaples with proportion of probes with bead number < 3 is > 0.2
-bad_samples_lowbead <- as.data.frame(qc.summary$sample.beadnum.summary$tab)
-bad_samples_lowbead <- bad_samples_lowbead[bad_samples_lowbead$outliers==TRUE,]
-anno_bad_lowbead <- anno_base[anno_base$idat_filename %in% bad_samples_lowbead$sample.name,]
-
-#combine all bad samples into vector
-bad_samples <- c(
-  bad_samples_meth_unmeth$sample.name,
-  bad_samples_control$sample.name,
-  bad_samples_detectionp$sample.name,
-  bad_samples_lowbead$sample.name)
-
-#remove bad samples prior to performing quantile normalization
-qc.objects <- meffil.remove.samples(qc.objects, bad_samples)
-
-#determine the number of principal components of the control matrix to include in the quantile normalization
-#plots the quantile residuals remaining after fitting different numbers of control matrix principal components
-#I use the 'elbow' to determine the optimal number of pcs
-pc.fit <- meffil.plot.pc.fit(qc.objects)
-setwd(batchdir)
-print(pc.fit$plot)
-setwd("/data/MDATA")
-pc <- 8
-gc()
-
-#remove control probe variance from the sample quantiles
-#additional fixed and random effects can be included
-norm.objects <- meffil.normalize.quantiles(qc.objects,
-                                           fixed.effects = "Material",
-                                           random.effects= "Slide", 
-                                           number.pcs=pc,
-                                           verbose = TRUE)
-
-saveRDS(norm.objects, file = file.path(paste0(batchdir,"/norm.objects_pc8_fixedeffectsMaterial.rds")))
-norm.objects <- readRDS(paste0(batchdir,"/norm.objects_pc8_fixedeffectsMaterial.rds"))
-gc()
 
 #remove objects not needed for further analysis (i.e. free up memory)
-rm(list=setdiff(ls(), c("norm.objects", "bad.cpgs", "cores", "batchdir", "samplesheet")))
+rm(list=setdiff(ls(), c("new.norm.beta", "ref.norm.betas", "combo_samplesheet", "batchdir", "batchdirout", "cores")));
 gc()
 
-#normalize samples using their normalized quality control objects and remove bad CpGs (from the QC analysis)
-norm.beta <- meffil.normalize.samples(norm.objects,
-                                         just.beta = T,
-                                         cpglist.remove = bad.cpgs,
-                                         verbose = TRUE)
 
-saveRDS(norm.beta, file = file.path(paste0(batchdir,"/norm.betas.rds"))); ## Original saveRDS(norm.signals, file = file.path("meffil_output/norm.signals.rds")) 
-norm.beta <- readRDS(paste0(batchdir,"/norm.betas.rds"))
-
-#convert normalized signals to beta values (if 'just.beta' = F)
-#beta <- meffil.get.beta(norm.signals$M, norm.signals$U, pseudo = 100)
-beta <- as.data.frame(norm.beta)
-rm(norm.beta)
+beta <- as.data.frame(cbind(new.norm.beta, ref.norm.betas[row.names(new.norm.beta),]))
+rm(new.norm.beta, ref.norm.betas)
 gc()
 
-fwrite(beta, paste0(batchdir,"/betas_pc8_fixedeffectsMaterial.txt"), 
-       row.names=TRUE, sep = "\t")
 
-## summary report of the normalization performance
-#pcs <- meffil.methylation.pcs(as.matrix(beta))
-#norm.summary <- meffil.normalization.summary(norm.objects, pcs=pcs)
+#############  Weeding extra XY/SNPs/etc probes based on 
+### Part 3 ##  https://zwdzwd.github.io/InfiniumAnnotation   
+#############  Another ~50K probes should be cleared.
+message("\nPart 3.", Sys.time(), "\nProbes cleansing extra ...\n");
+
+annotations_hg19 <- fread(file.path(batchdir,"HM450.hg19.manifest.tsv"),
+                          sep="\t", 
+                          verbose = TRUE,
+                          data.table = FALSE,
+                          stringsAsFactors = FALSE,
+                          check.names = FALSE,
+						  nThread = cores);
+
+annotations_hg19 <- annotations_hg19 %>%
+                    filter(MASK_general == FALSE) %>%
+                    #filter(MASK_sub30_copy == FALSE) %>%
+                    #filter(MASK_snp5_GMAF1p == FALSE) %>%
+                    filter(!CpG_chrm == "chrX") %>%
+                    filter(!CpG_chrm == "chrY") %>%
+                    filter(!grepl("rs",probeID)) %>%
+                    filter(!grepl("ch",probeID))
+
+beta_filtered <- beta[rownames(beta) %in% annotations_hg19$probeID,]
+rm(beta)
+gc()
+
+#reduce beta values by variable probes
+beta_filtered <- t(beta_filtered)
+beta_reduced <- beta_filtered[,order(-apply(beta_filtered,2,sd))[1:10000]]
+beta_reduced <- as.data.frame(beta_reduced)
+fwrite(beta_reduced, file.path(batchdirout,"combo_beta_top10Kprobes5se.tsv"),  sep = "\t", row.names = TRUE,  nThread = cores);
+beta_reduced <- fread(file.path(batchdirout,"combo_beta_top10Kprobes5se.tsv"), sep = "\t", nThread = cores);
+beta_reduced <- beta_reduced %>% column_to_rownames("V1");
+rm(beta_filtered)
+gc()
 
 
-#####################################################
-######## Make dimension reduction with UWOT  ########
-anno <- openxlsx::read.xlsx(samplesheet)
+#############  Make dimension reduction with UWOT  
+### Part 4 ##  PCA is slow single threaded need better package
+#############  >5hrs
+message("\nPart 4. Initiated:   ", Sys.time(), "\nGenerating PCA with top 200 componenets ...");
+PC <- prcomp(beta_reduced, 
+             center = TRUE, 
+			 scale = FALSE,
+			 rank. = 200); 
+#prcomp_svds(beta_corrected_filtered, k=100)
 
-PC <- prcomp(t(beta), center = TRUE, scale = FALSE) 
-saveRDS(PC, paste0(batchdir,"/pc_prcomp_puritycorrected.rds"))
-PC <- readRDS(paste0(batchdir,"/pc_prcomp_puritycorrected.rds"))
+saveRDS(PC, paste0(batchdirout,"/combo_200pc_prcomp5se.rds"))
+PC <- readRDS(paste0(batchdirout,"/combo_200pc_prcomp5se.rds"))
+message("\nDone PCA:   ", Sys.time(), "\nGenerating Umap ...");
 
 #unsupervised dimensionality reduction with UMAP
 umap <- uwot::umap(PC$x,
@@ -216,41 +294,38 @@ umap <- uwot::umap(PC$x,
 umap <- as.data.frame(umap)
 rownames(umap) <- rownames(PC$x)
 umap <- umap %>% rownames_to_column("idat_filename")
-anno <- anno[anno$idat_filename %in% umap$idat_filename,]
+newanno <- combo_samplesheet[combo_samplesheet$idat_filename %in% umap$idat_filename,];
 
-outf <- merge(umap, anno[,c(
-    "idat_filename",
-	"Sample",
-	"Primary_study",
-	"material_prediction",
-	"Platform_methy",
-	"Center_methy",
-	"Primary_study",
-	"material_prediction",
-	"Platform_methy",
-	"Center_methy",
-	"Age",
-	"Sex",
-	"Sex_prediction",
-	"OS_months",
-	"OS_status",
-	"Primary_category",
-	"Histology",
-	"Molecular",
-	"Combined_class_match",
-	"Secondary_class_match",
-	"C19MC_segments",
-	"fusion_matches",
-	"breakpoint_genes",
-	"amplifications",
-	"deletions",
-	"Likely_integrated_diagnosis")],
-    by = "idat_filename");
+outf <- merge(umap, newanno[,c(
+   "nn",
+   "idat_filename",
+   "Sample",
+   "Sex",
+   "Age",
+   "material_prediction",
+   "RFpurity.ABSOLUTE",
+   "RFpurity.ESTIMATE",
+   "LUMP",
+   "Location_specific",
+   "OS_months",
+   "OS_status",
+   "PFS_months",
+   "PFS_status",
+   "Histology",
+   "Molecular",
+   "Study",
+   "CNS.MCF",
+   "CNS.MCF.score",
+   "CNS.Subclass",
+   "CNS.Subclass.score")],
+   by = "idat_filename");
 
-fwrite(outf, paste0(batchdir,"/umap_1.txt"), 
-    row.names=TRUE, sep = "\t");
+outf <- arrange(outf, Study);
 
-file.rename(samplesheet, gsub(".xlsx",  ".done.xlsx", samplesheet));
+fwrite(outf, file.path(batchdirout,"/umap_1-PCA5se.txt"), 
+    row.names=TRUE, sep = "\t", nThread = cores);
+
+#file.rename(samplesheet, gsub(".xlsx",  ".done.xlsx", samplesheet));
 message(Sys.time());
 message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 message(" End of normalization and UMAP script ");
