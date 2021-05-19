@@ -1,3 +1,7 @@
+
+
+## 5/18/2021 :: With two UMAP plots on output 
+
 options(scipen = 999)
 library(data.table)
 library(parallel)
@@ -24,9 +28,9 @@ batchdir      <- "NormRcode/CNS13Krefset/";
 batchdirout   <- "TRANSFER/SAMPLESHEETS/compass"; 
 samplesheet   <- "NormRcode/CNS13Krefset/Compass_13K.xlsx";
 
-#############  Injest static samplesheet
-### Part 0 ##  anno_base -- rich file
-#############  anno -- minimal for meffil 
+#############  Inject static samplesheet
+### Part 0 ##  anno_base -- rich file for the ref. set
+#############  anno -- minimal for meffil normalization
 
 anno_base <- openxlsx::read.xlsx(samplesheet)
 anno <- anno_base %>% filter( CNS_study == "Case" );
@@ -45,10 +49,10 @@ anno <- anno %>% filter(!is.na(Basename))
 anno <- anno %>% filter(!duplicated(Basename))
 
 
-#############  Collect new samples from
-### Part 1 ##  compass    
-#############
-
+#############  Collect new samples from compass folder 
+### Part 1 ##  and check those against reference dataset samplesheet    
+###        ##  note samples should be preprocessed with Zhichao's pipeline to generate DKFZ scores
+#############  use 'roboreporter.pl' this one runs on compass folder in MDATA 
 
 compdirs  <- list.files(idatrootfolder, pattern = "^[0-9]+");
 newdirs   <- setdiff(compdirs, anno$Slide)
@@ -176,11 +180,11 @@ new_anno <- new_anno %>% filter(!duplicated(Basename))
 #############  One of the slowest part ~ 3hrs for 13K for new set 100 samples ~20-40min
 message("\nPart 2. ", Sys.time(), "\nBackground correction: meffil.qc ...\n");
 
-#new.qc.objects <- meffil.qc(new_anno, 
-#                          featureset = "common", 
-#                          cell.type.reference = NA, 
-#                          verbose = T)
-#saveRDS(new.qc.objects, file = file.path(batchdirout,"/new.qc.objects.rds"))
+new.qc.objects <- meffil.qc(new_anno, 
+                          featureset = "common", 
+                          cell.type.reference = NA, 
+                          verbose = T)
+saveRDS(new.qc.objects, file = file.path(batchdirout,"/new.qc.objects.rds"))
 new.qc.objects   <-    readRDS(file.path(batchdirout,"/new.qc.objects.rds"))
 gc()
 
@@ -191,10 +195,10 @@ qc.objects <- readRDS(paste0(batchdir,"/qc.objects.13K.rds"))
 ##combo.qc.objects   <- c(new.qc.objects, qc.objects[sample(1:length(names(qc.objects)), 1000, replace=T)]);
 combo.qc.objects <- c(new.qc.objects, qc.objects);
 
-combo.norm.objects <- meffil.normalize.quantiles(combo.qc.objects,
+combo.norm.objects <- meffil.normalize.quantiles( combo.qc.objects,
                        fixed.effects  = c("Material", "Array"), verbose = TRUE, 
-                       random.effects = "Slide",    ## you are looking for trouble: on 13K set
-                       number.pcs = 5 );           ## 23 may be too much
+                       random.effects = "Slide",    ## very slow part: on 13K set
+                       number.pcs = 4 );            ## 23 may be way too much
 
 black.cpgs    <- readRDS(paste0(batchdir,"/black.cpgs.rds"))
 # Generating normalized reference beta to the number of PCA (#5 from step above) for later reuse with new batches. 
@@ -204,8 +208,8 @@ ref.norm.beta <- meffil.normalize.samples(ref.norm.objects ,
                                        just.beta = T,
                                        cpglist.remove = black.cpgs,
                                        verbose = TRUE)
-saveRDS(ref.norm.beta, file = file.path(batchdir,"/norm.betas5se.rds"))
-ref.norm.betas <- readRDS(paste0(batchdir,"/norm.betas5se.rds"))
+saveRDS(ref.norm.beta, file = file.path(batchdir,"/norm.betas4se.rds"))
+ref.norm.betas <- readRDS(paste0(batchdir,"/norm.betas4se.rds"))
 
 # Subsetting it back to new data only 
 new.norm.objects <- combo.norm.objects[names(combo.norm.objects) %in% names(new.qc.objects)]
@@ -215,8 +219,8 @@ new.norm.beta <- meffil.normalize.samples(new.norm.objects ,
                                        verbose = TRUE)
 
 
-saveRDS(new.norm.beta, file = file.path(batchdirout,"/new.norm.beta5se.rds"))
-new.norm.beta  <- readRDS(paste0(batchdirout,"/new.norm.beta5se.rds"))
+saveRDS(new.norm.beta, file = file.path(batchdirout,"/new.norm.beta4se.rds"))
+new.norm.beta  <- readRDS(paste0(batchdirout,"/new.norm.beta4se.rds"))
 
 
 #remove objects not needed for further analysis (i.e. free up memory)
@@ -259,8 +263,8 @@ gc()
 beta_filtered <- t(beta_filtered)
 beta_reduced <- beta_filtered[,order(-apply(beta_filtered,2,sd))[1:10000]]
 beta_reduced <- as.data.frame(beta_reduced)
-fwrite(beta_reduced, file.path(batchdirout,"combo_beta_top10Kprobes5se.tsv"),  sep = "\t", row.names = TRUE,  nThread = cores);
-beta_reduced <- fread(file.path(batchdirout,"combo_beta_top10Kprobes5se.tsv"), sep = "\t", nThread = cores);
+fwrite(beta_reduced, file.path(batchdirout,"combo_beta_top10Kprobes4se.tsv"),  sep = "\t", row.names = TRUE,  nThread = cores);
+beta_reduced <- fread(file.path(batchdirout,"combo_beta_top10Kprobes4se.tsv"), sep = "\t", nThread = cores);
 beta_reduced <- beta_reduced %>% column_to_rownames("V1");
 rm(beta_filtered)
 gc()
@@ -274,10 +278,9 @@ PC <- prcomp(beta_reduced,
              center = TRUE, 
 			 scale = FALSE,
 			 rank. = 200); 
-#prcomp_svds(beta_corrected_filtered, k=100)
 
-saveRDS(PC, paste0(batchdirout,"/combo_200pc_prcomp5se.rds"))
-PC <- readRDS(paste0(batchdirout,"/combo_200pc_prcomp5se.rds"))
+saveRDS(PC, paste0(batchdirout,"/combo_200pc_prcomp4se.rds"))
+PC <- readRDS(paste0(batchdirout,"/combo_200pc_prcomp4se.rds"))
 message("\nDone PCA:   ", Sys.time(), "\nGenerating Umap ...");
 
 #unsupervised dimensionality reduction with UMAP
@@ -295,6 +298,24 @@ umap <- as.data.frame(umap)
 rownames(umap) <- rownames(PC$x)
 umap <- umap %>% rownames_to_column("idat_filename")
 newanno <- combo_samplesheet[combo_samplesheet$idat_filename %in% umap$idat_filename,];
+newanno$CNS.Subclass <- as.factor(newanno$CNS.Subclass);
+
+message("\nDone unsupervised:   ", Sys.time(), "\n now supervised ...");
+umap1 <- uwot::umap(PC$x,
+                   #n_components = 3,
+                   #pca = 100,
+                   n_neighbors = 10,
+                   y = anno$Combined_class_match,
+                   spread = 2,
+                   min_dist = 0.1,
+                   local_connectivity = 1,
+                   bandwidth = 1)
+umap1 <- as.data.frame(umap1)
+rownames(umap1) <- rownames(PC$x)
+umap1 <- umap1 %>% rownames_to_column("idat_filename")
+
+umap <- cbind(umap, umap1$V1, umap1$V2 );
+names(umap) <- c("idat_filename", "x1","y1","x2","y2");
 
 outf <- merge(umap, newanno[,c(
    "nn",
@@ -322,10 +343,9 @@ outf <- merge(umap, newanno[,c(
 
 outf <- arrange(outf, Study);
 
-fwrite(outf, file.path(batchdirout,"/umap_1-PCA5se.txt"), 
+fwrite(outf, file.path(batchdirout,"/umap_2-PCA4se.txt"), 
     row.names=TRUE, sep = "\t", nThread = cores);
 
-#file.rename(samplesheet, gsub(".xlsx",  ".done.xlsx", samplesheet));
 message(Sys.time());
 message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 message(" End of normalization and UMAP script ");
