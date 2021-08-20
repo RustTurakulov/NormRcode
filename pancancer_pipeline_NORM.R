@@ -9,9 +9,8 @@ if(length(args) != 1){
 }else{
      parameter = as.character(args[1])
      parameter = unlist(strsplit(parameter, ":"))
-     message("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n", Sys.time(),"  Started with parameters:\nCancer:     \t", parameter[1], "\nOutputdir:\t", parameter[2], "\nSamples:\t", parameter[3], "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
+     message("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n", Sys.time(),"  Started with parameters:\nCancer:     \t", parameter[1], "\nOutputdir:\t", parameter[2], "\nSamples:\t", parameter[3], "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
 }
-
 options(scipen = 999)
 library(data.table)
 library(parallel)
@@ -22,9 +21,10 @@ suppressMessages(library(dplyr))
 suppressMessages(library(meffil))
 suppressMessages(library(Rfast))
 suppressMessages(library(tibble))
+library(RSpectra)
 library(densvis)
 setwd("/data/MDATA")
-options(mc.cores=70)
+options(mc.cores=140)
 cores <- options()$mc.cores
 gc()
 
@@ -61,11 +61,12 @@ gc()
 
 if(is.na(newsamplesheet)){
 	message("\nNo samplesheet for new samples. Skip normalization.\nSlowly (ETA up to ~30min) devour pancancer beta value matrix...");   ### 
-	beta <- fread("pancancer/NORMALIZATION/Betas_pan_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved.txt", nThread = cores)
+	beta <- fread("pancancer/NORMALIZATION/Betas_pan_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved.txt", nThread = 32)
 	beta <- beta %>% column_to_rownames("V1")
     beta <- beta[, names(beta) %>% anno$idat_filename]
 }else{
     anno_new <- read.csv(newsamplesheet, header=F)  ## getting barcodes for new samples
+    allnewsamples <- as.character(anno_new$V1)
 	message("\n", nrow(anno_new), " New samples to normalize")
     newdirs = unique(matrix(unlist(strsplit(anno_new$V1, "_")), ncol=2, byrow=TRUE)[,1])
 
@@ -168,13 +169,17 @@ if(is.na(newsamplesheet)){
 	## Intersect samples only in original list and  no missed metadata in _KNN.combined.csv 
 	newsamplesheet <- newsamplesheet[newsamplesheet$idat_filename %in% anno_new$V1,]
     anno_new <-  anno_new[anno_new$V1 %in% newsamplesheet$idat_filename,]
-	write.csv(newsamplesheet, paste0(batchdirout,"/newsamples.csv", row.names=F))
-
-	message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\t", 
+    ms <- length(setdiff(allnewsamples, newsamplesheet$idat_filename ))
+	message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\t", 
 	 nx, "\t-- chips processed\n\t", 
 	 kk, "\t-- with KNN.combined.csv\n\t", 
-	 nrow(newsamplesheet),"\t-- new samples collected\n",
-	"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+     ms, "\t-- sample without annotations\n\t",
+     nrow(newsamplesheet),"\t-- new samples collected\n",
+	"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+   	write.csv(newsamplesheet, paste0(batchdirout,"/newsamples.csv", row.names=F))
+    # Some chips may not have all samples included *_KNN.combined.csv those samples will be filtered out from newsamplesheet
+    # run roboreporter.pl script prior, to make *_KNN.combined.csv spreadsheet 
+    # sample should be in Clinical category in samplesheet.csv)
 
 ##### Blending new samples with Drew database {anno_base}
 	anno_base_new                  <- anno_base[FALSE,]
@@ -221,8 +226,7 @@ if(is.na(newsamplesheet)){
 
 	anno_base <- rbind(anno_base, anno_base_new)  ## for later  joining with UMAP
     
-
-
+### prepare minimal annotation for the meffil
 	anno_new <- anno_base_new[,c("idat_filename", "Sex", "Sentrix_ID", "Sentrix_position", "Basename_Biowulf","Platform_methy","material_prediction")]
 	anno_new <- separate(anno_new, Sentrix_position, into = c("sentrix_row", "sentrix_col"), sep = 3, remove = TRUE)
 	anno_new$sentrix_row = gsub('R',"",anno_new$sentrix_row)
@@ -277,14 +281,18 @@ if(is.na(newsamplesheet)){
     anno_missing <- anno_base[anno_base$idat_filename %in% missing$missing,]
     anno_missing <- anno_missing[,c("Sample", "Histology")]
     anno_missing ;
+
 ####combine qc objects and save
+#### !! Merging new batch and reference set here
+
     qc.objects <- do.call(c, list(qc.objects, new.qc.objects))
     qc.objects <- qc.objects[!duplicated(names(qc.objects))]
     saveRDS(qc.objects,    file = file.path(batchdirout,"qc.objects.rds"))
     rm(new.qc.objects)
     qc.objects <- readRDS(file.path(batchdirout, "qc.objects.rds"))
 	gc()
-#########qc summary######## ~slow on large set
+
+	#########qc summary######## ~slow on large set
 	qc.summary <- meffil.qc.summary(qc.objects)
 	
 	##extract bad CpGs for later
@@ -310,12 +318,13 @@ if(is.na(newsamplesheet)){
 	##bad_samples_lowbead <- fread(file.path(batchdir, "qc_lowbead.txt"))
 	bad_samples_lowbead <- bad_samples_lowbead[bad_samples_lowbead$outliers==TRUE,]
 
-    bad_samples <- c(
+    bad_samples_all <- c(
        bad_samples_meth_unmeth$sample.name,
        bad_samples_control$sample.name,
        bad_samples_detectionp$sample.name,
        bad_samples_lowbead$sample.name)
-	message("\nExcluded samples with failed QCs:\n", bad_samples)
+    newsmplsfailedqc <- intersect(anno_base_new$idat_filename, bad_samples_all)
+    bad_samples <- setdiff(bad_samples_all,  newsmplsfailedqc)
 	qc.objects <- meffil.remove.samples(qc.objects, bad_samples)
     rm(qc.summary)
     gc()
@@ -332,12 +341,12 @@ if(is.na(newsamplesheet)){
     message("\n\nStart quantiles normalization:   ", Sys.time(),"...");
 	norm.objects <- meffil.normalize.quantiles( qc.objects,
                       fixed.effects  = c("Material", "Array"), verbose = TRUE,
-####                  random.effects = "Slide",      ## not working properly sometimes and adds >1hr
+ ##                   random.effects = "Slide",      ## not working properly sometimes and adds >1hr
                       number.pcs = 11 );             ## between 4 and 10 depends how much variability you need to trim
 	saveRDS(norm.objects, file = file.path(batchdirout,"norm.objects_pc11.rds"));
 	norm.objects <- readRDS(file.path(batchdirout,"norm.objects_pc11.rds"))
 	message("\n\nDone quantiles normalization:   ", Sys.time(), "\n now extracting beta...");
-	options(mc.cores=70)
+	options(mc.cores=90)
     cores <- options()$mc.cores
 
 #### Generating normalized beta to the number of PCA (Part 0 from step above) for later reuse with new batches. 
@@ -406,34 +415,76 @@ message("\nRemoving ", length(bad.cpgs), " of bad cpgs: mt, X, Y, SNPs");
 beta <- beta[!rownames(beta) %in% bad.cpgs_filter,]
 beta_t <- t(beta)
 rm(beta)
-gc()
 beta_reduced <- beta_t[,Rfast::colVars(as.matrix(beta_t), std = TRUE, parallel = TRUE)>0.227]
 beta_reduced <- as.data.frame(beta_reduced)
 fwrite(beta_reduced, file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),
        sep = "\t", row.names = TRUE )
 message("\nSaved transposed reduced file with beta for ", dim(beta_reduced)[2] ," top variable cpgs with SD>0.227\n");
-#big clenup
-rm(list=setdiff(ls(), c("beta_reduced", "anno_base", "parameter", "batchdir", "newidats", "batchdirout", "cores")))
+#beta_reduced <- read.csv(file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),sep = "\t", row.names =1 )
+
+message("\nExcluded samples with failed QCs:\n")
+print(bad_samples);
+if (length(newsmplsfailedqc)>0) {
+	message("\n^^^^^^^^^^^^^^^^^\n!!! ATTENTION !!!  You have QC outliers in your batch.\n^^^^^^^^^^^^^^^^^  Check QCs for those samples:")
+	BADAS <- anno_base_new[anno_base_new$idat_filename %in%  newsmplsfailedqc, c("Sample","idat_filename", "Primary_category", "Primary_study")]
+	print(BADAS)
+}else{message("\nGood: No QC outliers in new batch\n")}; 
+
+#big cleanup
+rm(list=setdiff(ls(), c("beta_reduced", "anno_base", "newsmplsfailedqc", "newsamplesheet", "parameter", "batchdir", "batchdirout", "cores")))
 gc()
 
-#####  ?? Optional reduction with principal components
-# PC <- prcomp(beta_reduced, 
-#             center = TRUE, 
-#			 scale = FALSE,
-#			 rank. = 200); 
-#saveRDS(PC, file.path(batchdirout,"combo_200pc_prcomp5.rds"));
-#PC <- readRDS(file.path(batchdirout,"combo_200pc_prcomp5.rds"));
-#message("\nDone PCA:   ", Sys.time(), "\nGenerating Umap ...\n");
+##### fast PCA via RSpectra SVD by Martin Sill m.sill@dkfz.de (2018)
+##### if(!require(RSpectra)) install.packages("RSpectra")
+
+prcomp_svds <-
+  function(x, retx = TRUE, center = TRUE, scale. = FALSE, tol = NULL, k=nrow(x), ...)
+  {
+    chkDots(...)
+    x <- as.matrix(x)
+    x <- scale(x, center = center, scale = scale.)
+    cen <- attr(x, "scaled:center")
+    sc <- attr(x, "scaled:scale")
+    if(any(sc == 0))
+      stop("cannot rescale a constant/zero column to unit variance")
+    s <- svds(x, k)
+    s$d <- s$d / sqrt(max(1, nrow(x) - 1))
+    if (!is.null(tol)) {
+      ## we get rank at least one even for a 0 matrix.
+      rank <- sum(s$d > (s$d[1L]*tol))
+      if (rank < ncol(x)) {
+        s$v <- s$v[, 1L:rank, drop = FALSE]
+        s$d <- s$d[1L:rank]
+      }
+    }
+    dimnames(s$v) <-
+      list(colnames(x), paste0("PC", seq_len(ncol(s$v))))
+    r <- list(sdev = s$d, rotation = s$v,
+              center = if(is.null(cen)) FALSE else cen,
+              scale = if(is.null(sc)) FALSE else sc)
+    if (retx) r$x <- x %*% s$v
+    class(r) <- "prcomp"
+    r
+  }
+#####  This is optional reduction variable reduction. Makes picture sharper for big sets
+message("\nRun principal component reduction on reduced beta", Sys.time(), "...");
+ PC <- prcomp_svds(beta_reduced, 
+             center = TRUE, 
+			 scale = FALSE,
+			 rank. = 200); 
+saveRDS(PC, file.path(batchdirout,"combo_200pc_prcomp.rds"));
+PC <- readRDS(file.path(batchdirout,"combo_200pc_prcomp.rds"));
+beta_reduced <- PC$x;
 
 message("\nUmap straight on beta values   ", Sys.time(), "\ngenerating X and Y with uwot  ...");
-umap <- uwot::umap(beta_reduced,    #PC$x -- if pca done 
+umap <- uwot::umap(beta_reduced,  
                    #n_components = 2,
                    #pca = 25,
-                   n_neighbors = 10,
-                   metric = "cosine",
+                   n_neighbors = 10,     # 10
+                   metric = "cosine",   
                    #y = anno_pan$Combined_class_match,
-                   spread = 1,
-                   min_dist = 0,
+                   spread = 1,          # 1
+                   min_dist = 0.1,      # 0
                    local_connectivity = 1,
                    bandwidth = 1)
 
@@ -503,27 +554,40 @@ outf <- merge(umap, newanno[,metadatatouse],   by = "idat_filename");
 outf$Molecular <- paste(outf$Variants,  
                  '|',  outf$"Fusions/translocations",
                  '|',  outf$Assay)
-outf[grep("NA | NA | NA", outf$Molecular), "Molecular"] <- ""; 
+outf[grep("NA . NA . NA", outf$Molecular), "Molecular"] <- ""; 
+# Add attention label for molecular column for QC failed samples
+outf[outf$idat_filename %in% newsmplsfailedqc, "Molecular"] <- paste(outf[outf$idat_filename %in% newsmplsfailedqc, "Molecular"], "Bad QC")
 outf <- outf[, -c(20,21,22)]
-## Override compass labels could be some sample info loss due to duplications
+## Override compass labels could be some sample info loss due to duplications with the reference data
 outf$Study <- "RefPool";
-outf[outf$idat_filename %in% newidats$V1, "Study"] <- "compass"
+outf[outf$idat_filename %in% newsamplesheet$idat_filename, "Study"] <- "compass"
 names(outf) <- c(
    "idat_filename",
-   "x1","y1","x2","y2",
-   "Sample", "Sex", "Age",
+   "x1","y1","x2","y2",  
+   "Sample", 
+   "Sex", 
+   "Age",
    "material_prediction",
-   "RFpurity.ABSOLUTE", "RFpurity.ESTIMATE",  "LUMP",
-   "Location_general",  "Location_specific", 
-   "OS_months",         "OS_status",          "PFS_months",  "PFS_status",
-   "Histology",         "Primary_study",
-   "MCF_v11b6",			"MCF_v11b6_score",
-   "MC_v11b6",			"MC_v11b6_score"
-   "Molecular",         "Study")
+   "RFpurity.ABSOLUTE", 
+   "RFpurity.ESTIMATE",  
+   "LUMP",
+   "Location_general",  
+   "Location_specific", 
+   "OS_months",
+   "OS_status",
+   "PFS_months",
+   "PFS_status",
+   "Histology",       
+   "Primary_study",
+   "CNS.MCF",
+   "CNS.MCF.score",
+   "CNS.Subclass",
+   "CNS.Subclass.score",
+   "Molecular",
+   "Study")
 outf <- arrange(outf, Study);
-
 fwrite(outf, file.path(batchdirout,"umap_2shiny.txt"), 
-    row.names=TRUE, sep = "\t", nThread = cores);
+    row.names=TRUE, sep = "\t", nThread = 32);
 
 message(Sys.time());
 message("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
