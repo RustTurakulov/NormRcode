@@ -4,6 +4,7 @@
 args = commandArgs(trailingOnly = TRUE)
 # args = "Placenta:NewCNSdir:TRANSFER/newbatch.txt"
 # args = "Neuropathology:CNS_Aug13:TRANSFER/newbatch_aug13.txt" 
+# args = "Sarcoma:Sarcoma_Aug13:TRANSFER/newbatch_aug13.txt" 
 if(length(args) != 1){
       stop("!!! Crash !!!\nParameter settings missed in sbatch: [cancer:outputfolder:newsamplesheet] \nWhere:\n   cancer \t  -- [Primary_category] from annotation table column [CC]\n   outputfolder   -- directory to save at /data/MDATA/TRANSFER\n   newsamplesheet -- full path to the new batch metadata\nTry to rerun sbatch with appropriate settings for like this:\n\nsbatch /data/MDATA/NormRcode/norm.sh  Thoracic|Bone and soft tissue:NewCNSdir:TRANSFER/newbatch.txt\n\n")
 }else{
@@ -14,7 +15,7 @@ if(length(args) != 1){
 options(scipen = 999)
 library(data.table)
 library(parallel)
-library(readxl)
+library(readxl) #read_excel
 suppressMessages(library("openxlsx")) #, lib.loc="/home/prattdw/R/4.0/library/")
 suppressMessages(library(tidyr))
 suppressMessages(library(dplyr))
@@ -36,12 +37,17 @@ newsamplesheet = as.character(parameter[3])
 dir.create(batchdirout, recursive = TRUE)
 samplesheet    = "bams_RNAseq/Sample_sheet_master.xlsm"; # the database
 
+
 #############  Inject static samplesheet
 ### Part 0 ##  anno_base -- rich file for the ref. set
 #############  anno -- minimal for meffil normalization
 message("\nLoading excel masterfile...")
 anno_base <- openxlsx::read.xlsx(samplesheet)
-anno <- anno_base[grep(parameter[1], anno_base$Primary_category), ] ## 1st filter for cancer type set at command line 
+if (parameter[1] == "Sarcoma") {
+   anno <- anno_base[grep("Case", anno_base$panSARCOMA), ]             ## Sarcoma flag is in different column    
+}else{
+   anno <- anno_base[grep(parameter[1], anno_base$Primary_category), ] 
+}
 anno <- anno[!is.na(anno$pan_study),]
 anno <- anno[,c("idat_filename", "Sex", "Sentrix_ID", "Sentrix_position", "Basename_Biowulf","Platform_methy","material_prediction")]
 anno <- separate(anno, Sentrix_position, into = c("sentrix_row", "sentrix_col"), sep = 3, remove = TRUE)
@@ -111,7 +117,7 @@ if(is.na(newsamplesheet)){
 		   kk = kk +1;
 			 rawsheetfull  <- read.csv(knnsheet, row.names=1);
 			 sampletype = rawsheetfull[,grep('Sample_Plate', names(rawsheetfull), ignore.case = T, perl = T)];
-			 rawsheet <- rawsheetfull[grepl("Clinical|Brain", sampletype, ignore.case = TRUE, perl = TRUE), ]; ## Only some rows/types go in
+			 rawsheet <- rawsheetfull[grepl("Clinical|Brain|Sarcoma", sampletype, ignore.case = TRUE, perl = TRUE), ]; ## Only some rows/types go in
 			 nnn                  = rep(kk, nrow(rawsheet));
 			 Sample               = rawsheet[,grep('SAMPLE_NAME', names(rawsheet), ignore.case = T, perl = T)];
 			 idat_filename        = rawsheet[,which( names(rawsheet) == 'ID')];
@@ -132,7 +138,11 @@ if(is.na(newsamplesheet)){
 			 matched_cases        = rawsheet[,grep('NEARESTNEIGHBOR', names(rawsheet), ignore.case = T, perl = T)];
 			 Location_general     = rawsheet[,grep('TUMOR_SITE',      names(rawsheet), ignore.case = T, perl = T)];
 			 Location_specific    = rawsheet[,grep('SURGICAL_CASE',   names(rawsheet), ignore.case = T, perl = T)];
-			 Neoplastic           = rep("Neuropathology", nrow(rawsheet));
+			 if(parameter[1] == "Sarcoma") {
+                 Neoplastic           = rep("Neuropathology", nrow(rawsheet));
+			 }else{
+                 Neoplastic           = rep("Sarcoma", nrow(rawsheet));
+			 }
 			 Primary_category     = rep("Case",           nrow(rawsheet));
 			 CNS_study            = rep("Case",           nrow(rawsheet));
 			 OS_months            = rep(NA,               nrow(rawsheet));
@@ -142,6 +152,7 @@ if(is.na(newsamplesheet)){
 			 Histology            = rawsheet[,grep('DIAGNOSIS', names(rawsheet), ignore.case = T, perl = T)];
 			 Molecular            = rawsheet[,grep('NOTES',     names(rawsheet), ignore.case = T, perl = T)];
 			 Study                = rep("compass",        nrow(rawsheet));
+			 NCI_METRIC           = rep("",        nrow(rawsheet));
 			 predFFPE             = rawsheet[,grep('MATERIAL_TYPE',     names(rawsheet), ignore.case = T, perl = T)];
 			 CNS.MCF              = rawsheet[,which( names(rawsheet) == 'MCF1')]; 
 			 CNS.MCF.score        = rawsheet[,grep('MCF1.SCORE',        names(rawsheet), ignore.case = T)];
@@ -151,8 +162,8 @@ if(is.na(newsamplesheet)){
 			 RFpurity.ESTIMATE    = rawsheet[,grep('RFPURITY.ESTIMATE', names(rawsheet), ignore.case = T, perl = T)];
 			 LUMP                 = rawsheet[,grep('LUMP',              names(rawsheet), ignore.case = T, perl = T)];
 			 Basename             = rawsheet$Basename;
-			clms <- list(nnn, Sample,idat_filename,idat,Sentrix_ID,Sentrix_position,material_prediction,Platform_methy,Age,Sex,matched_cases, Location_general, Location_specific, Neoplastic, Primary_category, CNS_study, OS_months, OS_status,PFS_months, PFS_status, Histology,Molecular, Study,predFFPE,CNS.MCF, CNS.MCF.score,CNS.Subclass, CNS.Subclass.score, RFpurity.ABSOLUTE, RFpurity.ESTIMATE, LUMP,Basename)
-			names(clms) <- c("nn", "Sample", "idat_filename", "idat", "Sentrix_ID", "Sentrix_position", "material_prediction", "Platform_methy", "Age", "Sex", "matched_cases", "Location_general", "Location_specific", "Neoplastic", "Primary_category", "CNS_study", "OS_months","OS_status", "PFS_months", "PFS_status", "Histology", "Molecular", "Study", "predFFPE","CNS.MCF", "CNS.MCF.score", "CNS.Subclass", "CNS.Subclass.score", "RFpurity.ABSOLUTE", "RFpurity.ESTIMATE", "LUMP", "Basename");
+			clms <- list(nnn, Sample,idat_filename,idat,Sentrix_ID,Sentrix_position,material_prediction,Platform_methy,Age,Sex,matched_cases, Location_general, Location_specific, Neoplastic, Primary_category, CNS_study, OS_months, OS_status,PFS_months, PFS_status, Histology,Molecular, Study,NCI_METRIC,predFFPE,CNS.MCF, CNS.MCF.score,CNS.Subclass, CNS.Subclass.score, RFpurity.ABSOLUTE, RFpurity.ESTIMATE, LUMP,Basename)
+			names(clms) <- c("nn", "Sample", "idat_filename", "idat", "Sentrix_ID", "Sentrix_position", "material_prediction", "Platform_methy", "Age", "Sex", "matched_cases", "Location_general", "Location_specific", "Neoplastic", "Primary_category", "CNS_study", "OS_months","OS_status", "PFS_months", "PFS_status", "Histology", "Molecular", "Study", "NCI_METRIC", "predFFPE","CNS.MCF", "CNS.MCF.score", "CNS.Subclass", "CNS.Subclass.score", "RFpurity.ABSOLUTE", "RFpurity.ESTIMATE", "LUMP", "Basename");
 			colszs  <- sapply(clms,"length");  
 			for(i in 1:length(colszs)){
 				if(colszs[i] == 0){
@@ -210,6 +221,7 @@ if(is.na(newsamplesheet)){
     anno_base_new$Location_specific<- newsamplesheet$Location_specific
     anno_base_new$Neoplastic       <- newsamplesheet$Neoplastic
     anno_base_new$Primary_category <- newsamplesheet$Primary_category
+    anno_base_new$NCI_METRIC       <- newsamplesheet$NCI_METRIC
     anno_base_new$panCNS           <- newsamplesheet$CNS_study
     anno_base_new$OS_months        <- newsamplesheet$OS_months
     anno_base_new$OS_status        <- newsamplesheet$OS_status
@@ -224,7 +236,7 @@ if(is.na(newsamplesheet)){
     anno_base_new$v11b6            <- newsamplesheet$CNS.Subclass
     anno_base_new$MCF2_v11b6_score <- newsamplesheet$CNS.Subclass.score  ##This score is not in drew metadata
 
-	anno_base <- rbind(anno_base, anno_base_new)  ## for later  joining with UMAP
+	anno_base <- rbind(anno_base, anno_base_new)  ## for later  joining with UMAP 
     
 ### prepare minimal annotation for the meffil
 	anno_new <- anno_base_new[,c("idat_filename", "Sex", "Sentrix_ID", "Sentrix_position", "Basename_Biowulf","Platform_methy","material_prediction")]
@@ -419,7 +431,7 @@ beta_reduced <- beta_t[,Rfast::colVars(as.matrix(beta_t), std = TRUE, parallel =
 beta_reduced <- as.data.frame(beta_reduced)
 fwrite(beta_reduced, file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),
        sep = "\t", row.names = TRUE )
-message("\nSaved transposed reduced file with beta for ", dim(beta_reduced)[2] ," top variable cpgs with SD>0.227\n");
+message("\nSaved transposed reduced file with beta for ", dim(beta_reduced)[2], " top variable cpgs with SD>0.227\n");
 #beta_reduced <- read.csv(file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),sep = "\t", row.names =1 )
 
 message("\nExcluded samples with failed QCs:\n")
@@ -523,31 +535,57 @@ newanno <- anno_base[anno_base$idat_filename %in% umap$idat_filename,];
 newanno <- newanno[!duplicated(newanno$idat_filename),];
 
 ## Pick you own but do not forget to fix Rshiny app file later
-metadatatouse <- c(
-   "idat_filename",
-   "Sample",
-   "Sex",
-   "Age",
-   "material_prediction",
-   "ABSOLUTE",
-   "ESTIMATE",
-   "LUMP",
-   "Location_general",
-   "Location_specific",
-   "OS_months",
-   "OS_status",
-   "PFS_months",
-   "PFS_status",
-   "Histology",
-   "Variants",
-   "Fusions/translocations",
-   "Assay",
-   "Primary_study",
-   "MCF1_v11b6", 
-   "MCF1_v11b6_score",
-   "v11b6",
-   "MCF2_v11b6_score"
-)
+if(parameter[1] == "Sarcoma"){
+	metadatatouse <- c(
+	   "idat_filename",
+	   "Sample",
+	   "Sex",
+	   "Age",
+	   "material_prediction",
+	   "ABSOLUTE",
+	   "ESTIMATE",
+	   "LUMP",
+	   "Location_general",
+	   "Location_specific",
+	   "OS_months",
+	   "OS_status",
+	   "PFS_months",
+	   "PFS_status",
+	   "Histology",
+	   "Variants",
+	   "Fusions/translocations",
+	   "Assay",
+	   "Primary_study",
+	   "MCF1_v11b6",
+	   "MCF1_v11b6_score",
+	   "NCI_METRIC",        ## ? those are actually close with "v11b6" ? 
+	   "NCI_METRIC")
+}else{
+   metadatatouse <- c(
+	   "idat_filename",
+	   "Sample",
+	   "Sex",
+	   "Age",
+	   "material_prediction",
+	   "ABSOLUTE",
+	   "ESTIMATE",
+	   "LUMP",
+	   "Location_general",
+	   "Location_specific",
+	   "OS_months",
+	   "OS_status",
+	   "PFS_months",
+	   "PFS_status",
+	   "Histology",
+	   "Variants",
+	   "Fusions/translocations",
+	   "Assay",
+	   "Primary_study",
+	   "MCF1_v11b6", 
+	   "MCF1_v11b6_score",
+	   "v11b6",
+	   "MCF2_v11b6_score")
+}
 
 #Some text conditioning for the r-shiny code compartibility
 outf <- merge(umap, newanno[,metadatatouse],   by = "idat_filename");

@@ -11,15 +11,18 @@ jsCode <- "shinyjs.resetSel = function() { Plotly.restyle(plot, {selectedpoints:
 
 
 #setwd("/srv/shiny-server")
-anno       <- read.csv("umap_2shiny.txt", sep="\t", row.names=2, header=T);
-#anno      <- read.csv("umap_2-PCA5_frederick96.txt", sep="\t", row.names=2, header=T);
-#mypalette <- rainbow(max(as.numeric(as.factor(anno$CNS.Subclass))));
-mycols    <- rainbow(max(as.numeric(as.factor(anno$CNS.Subclass))));
-#mycols <- readRDS("mycols.rds")
+anno     <- read.csv("LGG_umap_2-PCA5-10k.txt", sep="\t", row.names=2, header=T);
+#anno     <- read.csv("umap_2shiny.txt", sep="\t", row.names=2, header=T);
+mycolors <- readRDS("mycols.rds")
 
-NewSmpls  <- anno$Sample;
-NewSmpls[anno$Study != 'compass']<- NA 
-
+## Classification uniformly match colors
+anno$CNS.MCF      <- gsub(" |,|/|__", "_", anno$CNS.MCF) 
+anno$CNS.MCF      <- gsub("__", "_", anno$CNS.MCF) 
+anno$CNS.MCF      <- gsub("__", "_", anno$CNS.MCF) 
+anno$CNS.Subclass <- gsub(" |,|/|__", "_", anno$CNS.Subclass ) 
+anno$CNS.Subclass <- gsub("__", "_", anno$CNS.Subclass)
+anno$CNS.Subclass <- gsub("__", "_", anno$CNS.Subclass)
+anno$CNS.Subclass <- gsub("_$", "", anno$CNS.Subclass, perl=TRUE)
 
 
 options(max.print=1000000)
@@ -30,14 +33,14 @@ ui <- dashboardPage(skin = "red",
                               tags$style(".main-header {max-height: 70px}"),
                               tags$style(".main-header .logo {height: 70px;}"),
                               tags$style(".sidebar-toggle {height: 70px; padding-top: 0px !important;}"),
-                              tags$style(".navbar {min-height:70px !important}")
+                              tags$style(".navbar {min-height:70px !important}"),
                       ),
-                      title = span("National Cancer Institute", style = "color: white; font-size: 30px"), titleWidth = 400),
+                       title = "National Cancer Institute"),
                     ## Sidebar content
                     dashboardSidebar(
                       sidebarMenu(
-                        menuItem("UMAP",     tabName = "umap"),
-                        menuItem("UMAP supervised", tabName = "umapd3"),
+                        menuItem("UMAP",  tabName = "umap"),
+                        menuItem("densMAP",     tabName = "umapd3"),
                         #menuItem("densMAP", tabName = "densMAP"),
                         #menuItem("t-SNE", tabName = "tsne"),
                         #menuItem("purity correction test", tabName = "correction"),
@@ -164,16 +167,14 @@ server <- shinyServer(function(input, output, session) {
   ##  draw the first main plot
   output$plot1 <- renderPlotly({
     # use the key aesthetic/argument to help uniquely identify selected observations
-    key1 <- rownames(anno)
+    key1 <- row.names(anno) 
+    key2 <- anno$Sample
 #    cnames <- aggregate(cbind(x1, y1) ~ CNS.Subclass, data=anno, FUN=function(x)mean((x)))    
-    p <- ggplot(data=anno, aes(x=x1,y=y1,key=key1)) +
-      #geom_point(colour="grey", size=2, alpha=1, stroke=0.5) +
-      #geom_point(aes(x[Sample=="Y426"],y[Sample=="Y426"]), colour="red", size=3.5, alpha=1, stroke=0.5) +
-      geom_point(aes(color=CNS.Subclass),  size=2, alpha=1) +
-#      geom_text(aes(label=NewSmpls), color = "black", size = 5) +                                   ## text for compass lablels
+    p <- ggplot(data=anno, aes(x=x1,y=y1, key=key1)) +
+       geom_point(aes(color = CNS.Subclass),  size=2, alpha=1) +
 #      geom_text(data=cnames, aes(x=x1, y=y1, label = CNS.Subclass), position = position_dodge(width=0.5),  size=2.5, inherit.aes = FALSE) +       ## Text for clusters
-      theme_classic() +
-      theme(axis.text.y = element_text(size=9, color="black"),
+       theme_classic() +
+       theme(axis.text.y = element_text(size=9, color="black"),
             axis.text.x = element_text(size=9, color="black"),
             axis.ticks.y = element_line(color="black", size = 0.5),
             axis.ticks.x = element_line(color="black", size = 0.5),
@@ -187,20 +188,20 @@ server <- shinyServer(function(input, output, session) {
             legend.key.size = unit(0.5, 'lines'),
             axis.title.x = element_blank(),
             axis.title.y = element_blank()) +
-      labs(x = "umap1", 
-           y = "umap2") +
-      theme(legend.position="right") +
-      theme(plot.margin=unit(c(0,0,0,0),"cm")) +
-      scale_color_manual("Methylation class", values = mycols, guide = guide_legend(override.aes = list(shape = 15))) +
-      scale_x_continuous(breaks = seq(-100, 100, by=5)) +
-      scale_y_continuous(breaks = seq(-100, 100, by=5)) +
-      coord_fixed(xlim = ranges2$x, ylim = ranges2$y, expand = FALSE)
+#     labs(x = "umap1", 
+#           y = "umap2") +
+       theme(legend.position="right") +
+       theme(plot.margin=unit(c(0,0,0,0),"cm")) +
+       scale_color_manual("Methylation class", values = mycolors[sort(names(mycolors))], guide = guide_legend(override.aes = list(shape = 15))) +
+       scale_x_continuous(breaks = seq(-100, 100, by=5)) +
+       scale_y_continuous(breaks = seq(-100, 100, by=5)) +
+       coord_fixed(xlim = ranges2$x, ylim = ranges2$y, expand = FALSE)
 
-      ggplotly(p) %>% layout(height = 1100, width = 1200, dragmode = "select", xaxis = list(autorange = TRUE),
-                           yaxis = list(autorange = TRUE)) %>%
-
-        add_annotations(x = subset(p$data, Study == "compass")$x1,
-                        y = subset(p$data, Study == "compass")$y1,
+    ggplotly(p) %>% layout(height = 1000, width = 1000, dragmode = "select",
+                  xaxis = list(autorange = TRUE), yaxis = list(autorange = TRUE)) %>%
+    
+    add_annotations(x = subset(p$data, Study == "compass")$x1,
+                      y = subset(p$data, Study == "compass")$y1,
                       text = subset(p$data, Study == "compass")$Sample,
                       showarrow = TRUE,
                       arrowcolor='black',
@@ -213,7 +214,6 @@ server <- shinyServer(function(input, output, session) {
                                   size = 16))
     
 
-    
   })  
   
   ## for each group, show the number of selected points
@@ -231,9 +231,24 @@ server <- shinyServer(function(input, output, session) {
   output$brush <- DT::renderDataTable({
     d <- event_data("plotly_selected")
     req(d)
-      DT::datatable(anno[unlist(d$key), c("Sample", "Age", "Sex", "material_prediction","RFpurity.ABSOLUTE", "LUMP","Study", "Location_specific",  "Histology","Molecular", "CNS.MCF","CNS.MCF.score", "CNS.Subclass","CNS.Subclass.score")],
-				  options = list(lengthMenu = c(5, 30, 50), pageLength = 10, scrollY = '450px')) %>%
-      DT::formatStyle(columns = c(1, 2, 3, 4, 5, 6, 7), fontSize = '120%')
+      DT::datatable(anno[unlist(d$key), c(
+        "Sample",
+        "Age",
+        "Sex", 
+        "material_prediction",
+        "RFpurity.ABSOLUTE",
+#      "LUMP",
+        "Study",
+        "Location_general",  
+        "Location_specific",  
+        "Histology",
+        "Molecular", 
+        "CNS.MCF",
+        "CNS.MCF.score", 
+        "CNS.Subclass",
+        "CNS.Subclass.score")],
+				options = list(lengthMenu = c(5, 30, 50), pageLength = 10, scrollY = '450px')) %>%
+      DT::formatStyle(columns = c(1, 2, 3, 4, 5, 6, 7), fontSize = '100%')
   })
   
   # # When a double-click happens, check if there's a brush on the plot.
@@ -280,49 +295,35 @@ server <- shinyServer(function(input, output, session) {
 
     output$scatterPlot_umap <- renderPlotly({
     # use the key aesthetic/argument to help uniquely identify selected observations
-    key2 <- rownames(anno)
-    p <- ggplot(data=anno, aes(x=x2,y=y2,key=key2)) +
-      #geom_point(colour="grey", size=2, alpha=1, stroke=0.5) +
-      #geom_point(aes(x[Sample=="Y426"],y[Sample=="Y426"]), colour="red", size=3.5, alpha=1, stroke=0.5) +
-      geom_point(aes(color=CNS.Subclass),  size=2, alpha=1) +
-      geom_text(aes(label=NewSmpls), color = "black", size = 5) +
-      theme_classic() +
-      theme(axis.text.y = element_text(size=9, color="black"),
-            axis.text.x = element_text(size=9, color="black"),
-            axis.ticks.y = element_line(color="black", size = 0.5),
-            axis.ticks.x = element_line(color="black", size = 0.5),
-            axis.ticks.length = unit(2,"mm"),
-            panel.border = element_rect(colour = "black", fill=NA, size=1),
-            #panel.border = element_blank(),
-            panel.grid.major = element_line(colour="grey", size=0.5),
-            axis.line = element_blank(),
-            legend.text=element_text(size=10),
-            legend.title=element_text(size=11),
-            legend.key.size = unit(0.5, 'lines'),
-            axis.title.x = element_blank(),
-            axis.title.y = element_blank()) +
-
-			#			add_annotations(x = subset(anno, !is.na(NewSmpls))$x2,
-#							y = subset(anno, !is.na(NewSmpls))$y2,
-#						 text = subset(anno, !is.na(NewSmpls))$Sample,
-#			showarrow = TRUE,
-#			arrowcolor='red',
-#			arrowhead = 6,
-#			arrowsize = 1,
-#			xref = "x",
-#			yref = "y",
-#			font = list(color = 'black',
-#						family = 'arial',
-#						size = 14)) +
-      labs(x = "umap1", 
-           y = "umap2") +
-		   theme(legend.position="right") +
-			scale_color_manual("Methylation class", values = mycols, guide = guide_legend(override.aes = list(shape = 15))) +
-			scale_x_continuous(breaks = seq(-100, 100, by=5)) +
-			scale_y_continuous(breaks = seq(-100, 100, by=5)) +
-			coord_fixed(ratio = 1, xlim = ranges2$x, ylim = ranges2$y, expand = TRUE, clip = "on")
-    ggplotly(p) %>% layout(height = 1200, width = 1600, dragmode = "select", xaxis = list(autorange = TRUE),
-                           yaxis = list(autorange = TRUE)) 
+    key2 <- anno$Sample
+    
+    p1 <- plot_ly(data   = anno, x = ~x2, y = ~y2,
+                  type   = "scatter", mode = "markers",
+                  color  = ~anno$CNS.Subclass,
+                  colors = ~mycolors,
+                  text   = ~paste(rownames(anno), 
+                                 "<br>Sample: ", Sample, " Sex: ", Sex, " Age: ", Age, 
+                                 "<br>DKFZ Subclass:",  CNS.Subclass, " | ",CNS.MCF, 
+                                 "<br>", Location_general, Location_specific, Histology, Molecular)) %>% 
+#      add_trace(CNS.Subclass, mode = "markers")      %>%
+          layout(yaxis = list(title = ""), xaxis = list(title = ""), showlegend = T )    
+    
+    ggplotly(p1) %>% layout(height = 1000, width = 1300, dragmode = "select",
+                     xaxis = list(autorange = TRUE),yaxis = list(autorange = TRUE))   %>% 
+     
+    add_annotations(x = anno[anno$Study == "compass", "x2"],
+                        y = anno[anno$Study == "compass", "y2"],
+                        text = anno[anno$Study == "compass", "Sample"],
+                        showarrow = TRUE,
+                        arrowcolor='black',
+                        arrowhead = 6,
+                        arrowsize = 1,
+                        xref = "x",
+                        yref = "y",
+                        font = list(color = 'black',
+                                     family = 'arial',
+                                     size = 16))
+    
   })  
 })
 
