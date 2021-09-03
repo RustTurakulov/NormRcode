@@ -117,7 +117,8 @@ if(is.na(newsamplesheet)){
 		   kk = kk +1;
 			 rawsheetfull  <- read.csv(knnsheet, row.names=1);
 			 sampletype = rawsheetfull[,grep('Sample_Plate', names(rawsheetfull), ignore.case = T, perl = T)];
-			 rawsheet <- rawsheetfull[grepl("Clinical|Brain|Sarcoma", sampletype, ignore.case = TRUE, perl = TRUE), ]; ## Only some rows/types go in
+#			 rawsheet <- rawsheetfull[grepl("Clinical|Brain|Sarcoma|CBTN", sampletype, ignore.case = TRUE, perl = TRUE), ]; ## Only some rows/types go in
+			 rawsheet <- rawsheetfull; ## All in 
 			 nnn                  = rep(kk, nrow(rawsheet));
 			 Sample               = rawsheet[,grep('SAMPLE_NAME', names(rawsheet), ignore.case = T, perl = T)];
 			 idat_filename        = rawsheet[,which( names(rawsheet) == 'ID')];

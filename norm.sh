@@ -16,5 +16,6 @@ export TMPDIR=/lscratch/$SLURM_JOB_ID
 export SINGULARITYENV_THREADS=140
 gpfs_dirs="$(echo /gs* | tr ' ' ',')"
 export SINGULARITY_BINDPATH="/vf,${gpfs_dirs},/spin1,/data,/lscratch,/fdb"
+#export SINGULARITY_BINDPATH="/spin1,/data,/data/MDATA,/lscratch,/fdb"
 module load singularity
 singularity exec NormRcode/rbox_v0.sif /usr/bin/Rscript NormRcode/pancancer_pipeline_NORM.R $1
