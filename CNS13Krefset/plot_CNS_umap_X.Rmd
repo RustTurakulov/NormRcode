@@ -1,0 +1,126 @@
+
+---
+title: 'Pan CNS weekly samples embedding.'
+date: '`r paste("Created on", Sys.Date())`'
+output: html_document
+fontsize: 8pt
+---
+
+```{r tsne data,  echo=FALSE,error=FALSE,message=FALSE,warning=FALSE}
+#setwd("C:/Temp/HTML_RM")
+library(plotly)
+
+my.col   <- readRDS("/data/MDATA/NormRcode/CNS13Krefset/mycols.rds");
+umap.res <- read.csv("/data/MDATA/TRANSFER/SAMPLESHEETS/compass/umap_2-PCA5.txt", sep ="\t");
+
+```
+
+
+
+```{r umap1 code, echo=FALSE,error=FALSE,message=FALSE,warning=FALSE}
+p1 = plot_ly(x = umap.res$x1, y  = umap.res$y1, 
+             text = paste0(umap.res$Sample, " : ",umap.res$CNS.Subclass," : ", umap.res$CNS.Subclass.score,
+                           "<br>Hist: ", umap.res$Histology), 
+             color = umap.res$CNS.Subclass, colors = my.col, width = 800, height = 600,
+             type="scatter", mode = "markers", marker = list(size = 6, line = list(width=0.01)),
+             symbols = c('dot')) %>%
+  layout(showlegend = TRUE, legend = list(font = list(size = 9)),
+         xaxis = list(title = "umap 1", zeroline = FALSE),
+         yaxis = list(title = "umap 2", zeroline = FALSE)) %>%
+  
+  add_annotations(x = umap.res[umap.res$Study == "compass", "x1"],
+                        y = umap.res[umap.res$Study == "compass", "y1"],
+                        text = umap.res[umap.res$Study == "compass", "Sample"],
+                        showarrow = TRUE,
+                        arrowcolor='black',
+                        arrowhead = 6,
+                        arrowsize = 1,
+                        xref = "x",
+                        yref = "y",
+                        font = list(color = 'black',
+                                     family = 'arial',
+                                     size = 12))
+
+ 
+```
+
+
+
+```{r densmap code, echo=FALSE,error=T,message=FALSE,warning=FALSE}
+
+m<-highlight_key(umap.res[,c(
+        "idat_filename",
+        "x2","y2",
+        "Sample",
+        "Age",
+        "Sex", 
+        "material_prediction",
+        "RFpurity.ABSOLUTE",
+        "LUMP",
+        "Study",
+        "Location_general",  
+        "Location_specific",  
+        "Histology",
+        "Molecular", 
+        "CNS.MCF",
+        "CNS.MCF.score", 
+        "CNS.Subclass",
+        "CNS.Subclass.score")])
+
+p3<-ggplot(m,aes(x2,y2)) +
+#            geom_point(aes(color = CNS.Subclass)) +
+            geom_point(aes(color = CNS.Subclass, label = Histology, label2 = Molecular, label3 = Sample)) +
+            theme_minimal() +
+            scale_color_manual("Methylation class", 
+                                values = my.col[sort(names(my.col))], 
+                                guide = guide_legend(override.aes = list(shape = 19))) 
+
+gg<-highlight(ggplotly(p3),on = "plotly_selected", off = "plotly_relayout")
+
+T<-crosstalk::bscols(list(gg  %>%
+          add_annotations(x = subset(umap.res, Study == "compass")$x2,
+          y = subset(umap.res, Study == "compass")$y2,
+          text = subset(umap.res, Study == "compass")$Sample,
+          showarrow = TRUE,
+          arrowcolor='black',
+          arrowhead = 6,
+          arrowsize = 1,
+          xref = "x",
+          yref = "y",
+          font = list(color = 'black', family = 'arial',size = 16)),
+          
+          DT::datatable(m, rownames=F, 
+                   extensions = 'Buttons',
+                   options = list(autoWidth = TRUE,
+                      lengthMenu = c(5, 20, 50, 100),
+ #		                  scrollY = '1000px',
+                      scrollY = T, 
+                      scrollX = T,
+                      columnDefs = list(list(visible=FALSE, targets=c(1,2,4:10,13,15))),
+ 				              paging = TRUE,
+ 				              searching = TRUE,
+ 				              fixedColumns = TRUE,
+ 				              ordering = TRUE,
+ 				              dom = 'Blfrtip',
+ 				              buttons = c('colvis', 'copy', 'csv', 'excel'))) %>%
+
+          DT::formatStyle(columns = c(1:3,6:17), fontSize = '70%')))
+
+```
+
+### {.tabset}
+
+
+#### UMAP (unsupervised)
+```{r umap figure1, echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+p1
+
+
+```
+
+
+#### DENSMAP
+```{r display_data, warning=F, message=F, echo=F}
+T
+
+```
