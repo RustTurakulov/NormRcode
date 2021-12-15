@@ -1,0 +1,254 @@
+
+---
+title: '![NIH:NCI:LP](/data/MDATA/NormRcode/FixedCNSset/NCIlogo.png)<br> Pan CNS weekly samples embedding.'
+date: '`r paste("Created on: ", Sys.Date())`'
+output: html_document
+fontsize: 8pt
+---
+
+```{r umap data,  echo=FALSE,error=FALSE,message=FALSE,warning=FALSE}
+#setwd("C:/Temp/HTML_RM")
+library(plotly)
+rm(gg, m, p1, p3, T)
+
+my.col   <- readRDS("/data/MDATA/NormRcode/CNS13Krefset/mycols.rds");
+umap.res <- read.csv(file.path(batchdirout, "umap_2-PCA5.txt"), sep ="\t");
+
+
+columns <-c("RFpurity.ABSOLUTE", "RFpurity.ESTIMATE", "LUMP", "CNS.MCF.score", "CNS.Subclass.score")
+umap.res[, columns] <- lapply(columns, function(x) as.numeric(umap.res[[x]]))
+umap.res <- umap.res %>% 
+    mutate(across(c(RFpurity.ABSOLUTE, RFpurity.ESTIMATE, LUMP, CNS.MCF.score, CNS.Subclass.score), ~ round(., 2)))
+metarow  <- subset(umap.res, Study == "compass");
+
+#cluster labels
+dim.center = aggregate(subset(umap.res, select= c("x1", "y1", "x2", "y2")), list(umap.res$NCI_METRIC), median);
+colnames(dim.center)[1] = "cancer";
+xy1_annotations = lapply(unique(dim.center$cancer), function(x){
+    idx = which(dim.center$cancer == x)
+    ann = list(showarrow = F, x = dim.center$x1[idx], y = dim.center$y1[idx],
+    text = paste0("<b>",dim.center$cancer[idx],"</b>"),
+    bgcolor = alpha("white", 0.5),
+    font = list(size = 10, family = "helvetica", color = my.col[dim.center$cancer[idx]]));
+    ann;
+})
+xy2_annotations = lapply(unique(dim.center$cancer), function(x){
+    idx = which(dim.center$cancer == x)
+    ann = list(showarrow = F, x = dim.center$x2[idx], y = dim.center$y2[idx],
+    text = paste0("<b>",dim.center$cancer[idx],"</b>"),
+    bgcolor = alpha("white", 0.5),
+    font = list(size = 10, color = my.col[dim.center$cancer[idx]]));
+    ann;
+})
+
+```
+
+```{r disclaimer, warning=F, message=F, echo=F}
+DSTXT = kableExtra::kbl(paste("  Created on:", Sys.Date()), 
+   col.names = gsub("[.]", " ", "Classification using methylation profiling is a research tool under development, it is not verified and has not been clinically validated. Implementation of the results in a clinical setting is in the sole responsibility of the treating physician.")) %>%
+  kableExtra::kable_styling(bootstrap_options = "condensed", font_size = 8)
+
+```
+
+```{r umap1 code, echo=FALSE,error=FALSE,message=FALSE,warning=FALSE}
+p1 = plot_ly(x = umap.res$x1, y  = umap.res$y1, 
+             text = paste0(umap.res$Sample, " : ",umap.res$CNS.Subclass," : ", umap.res$CNS.Subclass.score,
+                           "<br>Hist: ", umap.res$Histology), 
+             color = umap.res$NCI_METRIC, colors = my.col, width = 800, height = 700,
+             type="scatter", mode = "markers", marker = list(size = 6, line = list(width=0.01)),
+             symbols = c('dot')) %>%
+  layout(showlegend = TRUE, legend = list(font = list(size = 8)),
+         annotations = xy1_annotations,
+         xaxis = list(title = "umap 1", zeroline = FALSE),
+         yaxis = list(title = "umap 2", zeroline = FALSE)) %>%
+  add_annotations(x = umap.res[umap.res$Study == "compass", "x1"],
+                  y = umap.res[umap.res$Study == "compass", "y1"],
+                  text = umap.res[umap.res$Study == "compass", "Sample"],
+                  showarrow = TRUE,
+                  arrowcolor='black',
+                  arrowhead = 6,
+                  arrowsize = 1,
+                  xref = "x",
+                  yref = "y",
+                  font = list(color = 'black',
+                             family = 'arial',
+                             size = 12))
+
+## table with labeled samples
+
+  MT = DT::datatable(metarow[, -c(1,3:6,16:19,22)], rownames=FALSE, 
+                   extensions = 'Buttons',
+                   options = list(autoWidth = FALSE,
+                      lengthMenu = c(5, 10, 25, 50),
+ #		                  scrollY = '1000px',
+                      scrollY = T, 
+                      scrollX = T,
+                      columnDefs = list(list(visible=FALSE, targets=c(0,2,4:9,11,13,16))),
+ 				              paging = TRUE,
+ 				              searching = TRUE,
+ 				              fixedColumns = TRUE,
+ 				              ordering = TRUE,
+ 				              dom = 'Blfrtip',
+ 				              buttons = c('colvis', 'copy', 'csv', 'excel'))) %>%
+		 DT::formatStyle(columns = c(1,3:17), fontSize = '70%')
+
+```
+
+```{r densmap code, echo=FALSE,error=T,message=FALSE,warning=FALSE}
+
+m<-highlight_key(umap.res[,c(
+        "idat_filename",
+        "x2","y2",
+        "Sample",
+        "Age",
+        "Sex", 
+        "material_prediction",
+        "RFpurity.ABSOLUTE",
+        "LUMP",
+        "Study",
+        "Location_general",  
+        "Location_specific",  
+        "Histology",
+        "Molecular", 
+        "NCI_METRIC",         
+        "CNS.MCF",
+        "CNS.MCF.score", 
+        "CNS.Subclass",
+        "CNS.Subclass.score")])
+
+p3<-ggplot(m,aes(x2,y2)) +
+#            geom_point(aes(color = CNS.Subclass)) +
+            geom_point(aes(color = NCI_METRIC, label = Histology, label2 = Molecular, label3 = Sample)) +
+            theme_minimal() +
+            scale_color_manual("Methylation class", 
+                                values = my.col[sort(names(my.col))], 
+                                guide = guide_legend(override.aes = list(shape = 19))) 
+
+gg<-highlight(ggplotly(p3),on = "plotly_selected", off = "plotly_relayout")
+
+T<-crosstalk::bscols(list(gg  %>%
+          add_annotations(x = subset(umap.res, Study == "compass")$x2,
+          y = subset(umap.res, Study == "compass")$y2,
+          text = subset(umap.res, Study == "compass")$Sample,
+          showarrow = TRUE,
+          arrowcolor='black',
+          arrowhead = 6,
+          arrowsize = 1,
+          xref = "x",
+          yref = "y",
+          font = list(color = 'black', family = 'arial',size = 16)),
+          
+          DT::datatable(m, rownames=F, 
+                   extensions = 'Buttons',
+                   options = list(autoWidth = TRUE,
+                      lengthMenu = c(5, 10, 25, 50),
+ #		                  scrollY = '1000px',
+                      scrollY = T, 
+                      scrollX = T,
+                      columnDefs = list(list(visible=FALSE, targets=c(0:2,5:11,13,16))),
+ 				              paging = TRUE,
+ 				              searching = TRUE,
+ 				              fixedColumns = TRUE,
+ 				              ordering = TRUE,
+ 				              dom = 'Blfrtip',
+ 				              buttons = c('colvis', 'copy', 'csv', 'excel'))) %>%
+
+          DT::formatStyle(columns = c(1:3, 5:19), fontSize = '70%')))
+
+```
+
+```{r dbscan code, echo=FALSE,error=FALSE,message=FALSE,warning=FALSE}
+library(dbscan,  lib = "/data/turakulovr2/R_libs")
+cl <- hdbscan(umap.res[,c("x1","y1")], minPts = 21)
+## minPts = 21-23 is the closest number to the original number of labels
+umap.res$cluster         <- cl$cluster;
+umap.res$membership_prob <- cl$membership_prob
+umap.res$outlier_scores  <- cl$outlier_scores
+
+p2 = plot_ly(x = umap.res$x1, y  = umap.res$y1, 
+             text = paste0(umap.res$Sample, " : ",umap.res$CNS.Subclass," : ", umap.res$CNS.Subclass.score,
+                           "<br>Hist: ", umap.res$Histology, "<br>ClustNscore: ", umap.res$cluster," | ", round(umap.res$membership_prob,2)), 
+             color = umap.res$cluster+1, 
+			 width = 800, height = 700,
+             type="scatter", mode = "markers",
+			 marker = list(size  = ifelse(umap.res$cluster == 0,  5,  7), # Decrease size of noise dots
+			              symbol = ifelse(umap.res$cluster == 0,  19, "circle"), # Mark noise as star
+			              line   = list(width=0.01)),
+             symbols = c('dot')) %>%
+  layout(showlegend = TRUE, legend = list(font = list(size = 8)),
+         annotations = xy1_annotations,
+         xaxis = list(title = "umap 1", zeroline = FALSE),
+         yaxis = list(title = "umap 2", zeroline = FALSE)) %>%
+  
+  add_annotations(x = umap.res[umap.res$Study == "compass", "x1"],
+                        y = umap.res[umap.res$Study == "compass", "y1"],
+                        text = umap.res[umap.res$Study == "compass", "Sample"],
+                        showarrow = TRUE,
+                        arrowcolor='black',
+                        arrowhead = 6,
+                        arrowsize = 1,
+                        xref = "x",
+                        yref = "y",
+                        font = list(color = 'black',
+                                     family = 'arial',
+                                     size = 12))
+
+
+
+TDBS <- data.frame( hddbscan=c(
+   cl$hc$method, 
+   cl$hc$dist.method,
+   dim(cl$hc[[1]])[1], 
+   cl$minPts,
+   last(names(cl$cluster_scores)),
+   sum(cl$cluster==0)));
+
+row.names(TDBS) <- c(
+					 "Method used in HDDBSCAN", 
+					 "Distance Method", 
+					 "Number of subjects (total)", 
+					 "Minimum size of clusters", 
+					 "Total number of clusters by DBSCAN", 
+					 "Number of outliers (black triangles)");
+
+
+```
+
+
+
+### {.tabset}
+
+
+#### UMAP (unsupervised)
+```{r umap figure1, echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+p1
+
+MT
+
+DSTXT
+
+```
+
+#### DENSMAP
+```{r display_densimap, warning=F, message=F, echo=F}
+T
+
+DSTXT
+
+```
+
+
+
+#### DBSCAN
+```{r dbscan, warning=F, message=F, echo=F}
+p2
+
+kableExtra::kbl(TDBS) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped","hover", "condensed"), font_size = 8)
+
+
+DSTXT
+
+```
+
+
