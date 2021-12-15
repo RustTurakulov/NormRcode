@@ -9,11 +9,10 @@ library(shinyjs)
 
 jsCode <- "shinyjs.resetSel = function() { Plotly.restyle(plot, {selectedpoints: [null]});}"
 
-
 #setwd("/srv/shiny-server")
-anno     <- read.csv("LGG_umap_2-PCA5-10k.txt", sep="\t", row.names=2, header=T);
-#anno     <- read.csv("umap_2shiny.txt", sep="\t", row.names=2, header=T);
-mycolors <- readRDS("mycols.rds")
+anno     <- read.csv("Y:/TRANSFER/HGAP/umap_2shiny.txt", sep="\t", row.names=2, header=T);
+mycolors <- readRDS("Y:/NormRcode/mycols.rds")
+
 
 ## Classification uniformly match colors
 anno$CNS.MCF      <- gsub(" |,|/|__", "_", anno$CNS.MCF) 
@@ -22,8 +21,11 @@ anno$CNS.MCF      <- gsub("__", "_", anno$CNS.MCF)
 anno$CNS.Subclass <- gsub(" |,|/|__", "_", anno$CNS.Subclass ) 
 anno$CNS.Subclass <- gsub("__", "_", anno$CNS.Subclass)
 anno$CNS.Subclass <- gsub("__", "_", anno$CNS.Subclass)
-anno$CNS.Subclass <- gsub("_$", "", anno$CNS.Subclass, perl=TRUE)
-
+anno$CNS.Subclass <- gsub("_$", "",  anno$CNS.Subclass, perl=TRUE)
+anno$NCI_METRIC <- gsub(" |,|/|__", "_", anno$NCI_METRIC ) 
+anno$NCI_METRIC   <- gsub("__", "_", anno$NCI_METRIC)
+anno$NCI_METRIC   <- gsub("__", "_", anno$NCI_METRIC)
+anno$NCI_METRIC   <- gsub("_$", "",  anno$NCI_METRIC, perl=TRUE)
 
 options(max.print=1000000)
 ui <- dashboardPage(skin = "red",

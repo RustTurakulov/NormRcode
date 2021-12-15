@@ -1,16 +1,18 @@
-## Drew's normalization pipeline with small tweaks by Rust
-## Oct 2021 :: pancancer set
-
-args = commandArgs(trailingOnly = TRUE)
+## fixed parameters
+numberpcs      = 11;     # Principal Components For Quantile Normalization ::CNS=14  : PAN=11  : SARCOMA=8
+kpcs4rdctn     = 200;    # Principal Component Number for matrix reduction : CNS=150 : PAN=200 : SARCOMA=50 
+stdevcutoff    = 0.27;   # Standard Deviation for most variable probes cut : CNS=0.27: PAN=0.27: SARCOMA=0.2 
 # args = "NOP:TESTdir1:TRANSFER/LGG_fulldataset.txt"
 # args = "Neuropathology:CNS_Aug13:TRANSFER/newbatch_aug13.txt" 
-# args = "Unknown:Renal_test1:TRANSFER/renal_test.txt" 
+# args = ".:PanCANCER:TRANSFER/SAMPLESHEETS/newbatch_nov11.txt" 
+
+args = commandArgs(trailingOnly = TRUE)
 if(length(args) != 1){
       stop("!!! Crash !!!\nParameter settings missed in sbatch: [cancer:outputfolder:newsamplesheet] \nWhere:\n   cancer \t  -- [Primary_category] from annotation table column [CC]\n   outputfolder   -- directory to save at /data/MDATA/TRANSFER\n   newsamplesheet -- full path to the new batch metadata\nTry to rerun sbatch with appropriate settings for like this:\n\nsbatch /data/MDATA/NormRcode/norm.sh  Thoracic|Bone and soft tissue:NewCNSdir:TRANSFER/newbatch.txt\n\n")
 }else{
      parameter = as.character(args[1])
      parameter = unlist(strsplit(parameter, ":"))
-     message("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n", Sys.time(),"  Started with parameters:\nCancer:     \t", parameter[1], "\nOutputdir:\t", parameter[2], "\nSamples:\t", parameter[3], "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
+     message("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n", Sys.time(),"  Started with parameters:\nCancer:     \t", parameter[1], "\nOutputdir:\t", parameter[2], "\nSamples:\t", parameter[3], "\nPC number for normalization:\t", numberpcs, "\nSD filter for probes threshold:\t", stdevcutoff, "\nNumber of top PCs for UMAP:\t", kpcs4rdctn, "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
 }
 options(scipen = 999, "width"=180)
 library(data.table)
@@ -27,16 +29,16 @@ library(densvis)
 setwd("/data/MDATA")
 options(mc.cores=140)
 cores <- options()$mc.cores
-gc()
+gc();
 
 ### Set paths around
-idatrootfolder = "pancancer/iScan_raw";
+#idatrootfolder = "pancancer/iScan_raw";
+idatrootfolder = "idat/";
 batchdir       = "pancancer/NORMALIZATION"; 
 batchdirout    = file.path("TRANSFER", parameter[2]);    # working folder
 newsamplesheet = as.character(parameter[3])
 dir.create(batchdirout, recursive = TRUE)
 samplesheet    = "NormRcode/Sample_sheet_master_tr.xlsx"; # xlsm is older database version while xlsx is new without purity columns
-
 
 #############  Inject static samplesheet
 ### Part 0 ##  anno_base -- rich file for the ref. set
@@ -69,7 +71,6 @@ message("\nLoading ref.qc.objects.rds...")
 qc.objects <- readRDS(file.path(batchdir,"ref.qc.objects.rds"))
 qc.objects <- qc.objects[names(qc.objects) %in% anno$Sample_Name]
 gc()
-
 
 if(is.na(newsamplesheet)){
 	message("\nNo samplesheet for new samples. Skip normalization.\nSlowly (ETA up to ~30min) devour pancancer beta value matrix...");   ### 
@@ -146,9 +147,9 @@ if(is.na(newsamplesheet)){
 				   Sex                = replace(Sex, grep("TBD",     Sex, ignore.case = T, perl = T), NA );
 				   Sex                = replace(Sex, grep("NA",      Sex, ignore.case = T, perl = T), NA );
 				   Sex                = replace(Sex, grep("N/A",     Sex, ignore.case = T, perl = T), NA );
-				 matched_cases        = rawsheet[,grep('NearestNeighbor', names(rawsheet), ignore.case = T, perl = T)];
-				 Location_general     = rawsheet[,grep('TUMOR_SITE',      names(rawsheet), ignore.case = T, perl = T)];
-				 Location_specific    = rawsheet[,grep('SURGICAL_CASE',   names(rawsheet), ignore.case = T, perl = T)];
+				 matched_cases        = rawsheet[,grep("NearestNeighbor", names(rawsheet), ignore.case = T, perl = T)];
+				 Location_general     = rawsheet[,grep("TUMOR_SITE",      names(rawsheet), ignore.case = T, perl = T)];
+				 Location_specific    = rawsheet[,grep("SURGICAL_CASE",   names(rawsheet), ignore.case = T, perl = T)];
 				 if(parameter[1] == "Sarcoma") {
 					 Neoplastic           = rep("Neuropathology", nrow(rawsheet));
 				 }else{
@@ -247,6 +248,17 @@ if(is.na(newsamplesheet)){
 		anno_base_new$CNS.Subclass     <- newsamplesheet$CNS.Subclass
 		anno_base_new$CNS.Subclass.score  <- newsamplesheet$CNS.Subclass.score  ##This score is not in drew metadata
 
+### Cleanup labels from spaces and commas  KNN spreadsheet 
+		anno_base_new$CNS.MCF      <- gsub(" |,|/|__", "_", anno_base_new$CNS.MCF) 
+		anno_base_new$CNS.MCF      <- gsub("__", "_",       anno_base_new$CNS.MCF) 
+		anno_base_new$CNS.MCF      <- gsub("__", "_",       anno_base_new$CNS.MCF) 
+		anno_base_new$CNS.MCF      <- gsub("_$", "",        anno_base_new$CNS.MCF, perl=TRUE) 
+		anno_base_new$CNS.Subclass <- gsub(" |,|/|__", "_", anno_base_new$CNS.Subclass) 
+		anno_base_new$CNS.Subclass <- gsub("__", "_",       anno_base_new$CNS.Subclass)
+		anno_base_new$CNS.Subclass <- gsub("__", "_",       anno_base_new$CNS.Subclass)
+		anno_base_new$CNS.Subclass <- gsub("_$", "",        anno_base_new$CNS.Subclass, perl=TRUE)
+        anno_base_new$NCI_METRIC   <- anno_base_new$CNS.Subclass;
+
 		anno_base <- rbind(anno_base, anno_base_new)  ## for later  joining with UMAP 
 	
 ### prepare minimal annotation for the meffil
@@ -296,8 +308,8 @@ if(is.na(newsamplesheet)){
 	}else{                                                     ##<<<<<<  if(parameter[1] != "NOP"){     
 	    qc.objects <- qc.objects[!names(qc.objects)=="Error"] ; 
 		anno_base_new <- anno_base;
-		if(nrow(anno_base_new)<200){
-			stop("!! You do not have enough samples for PCA reduction with 200 PCs!\nERROR:!! Increase sample set or reduce PC number (hardcoded).\n\n\n");
+		if(nrow(anno_base_new)<kpcs4rdctn){
+			stop("!! You do not have enough samples for PCA reduction with", kpcs4rdctn, "PCs!\nERROR:!! Increase sample set or reduce PC number (hardcoded).\n\n\n");
 		}
 	};
 
@@ -370,7 +382,7 @@ if(is.na(newsamplesheet)){
 ## The default settings is 11 in meffil.normalize.quantiles function
     message("\nGenerating PDF with principal components plot:\n")
 	pc.fit <- meffil.plot.pc.fit(qc.objects)
-	pdf(file.path(batchdirout, "PC.rplot.pdf")) 
+	pdf(file.path(batchdirout, "rplot_PC_graph.pdf")) 
 	print(pc.fit$plot)
 	dev.off()
 
@@ -379,9 +391,9 @@ if(is.na(newsamplesheet)){
 	norm.objects <- meffil.normalize.quantiles( qc.objects,
                       fixed.effects  = c("Material", "Array"), verbose = TRUE,
  ##                   random.effects = "Slide",      ## not working properly sometimes and adds >1hr
-                      number.pcs = 11 );             ## between 4 and 10 depends how much variability you need to trim
-	saveRDS(norm.objects, file = file.path(batchdirout,"norm.objects_pc11.rds"));
-	norm.objects <- readRDS(file.path(batchdirout,"norm.objects_pc11.rds"))
+                      number.pcs = numberpcs );             
+	saveRDS(norm.objects, file = file.path(batchdirout, paste0("norm.objects_pc", numberpcs, ".rds")));
+	norm.objects    <- readRDS(file.path(batchdirout,   paste0("norm.objects_pc", numberpcs, ".rds")));
 	message("\n\nDone quantiles normalization:   ", Sys.time(), "\n now extracting beta...");
 	options(mc.cores=52)  ## CNS Ok with 80
     cores <- options()$mc.cores
@@ -391,10 +403,10 @@ if(is.na(newsamplesheet)){
 	norm.beta <- meffil.normalize.samples(norm.objects,
                                           just.beta = T,
                                           cpglist.remove = bad.cpgs,
-                                          verbose = TRUE)
-    message("\nDone generating beta. Writing to rds file...");
-	saveRDS(norm.beta, file = file.path(batchdirout, "norm.signals_pc11.rds"))
-    norm.beta   <- readRDS(file.path(batchdirout, "norm.signals_pc11.rds"))
+                                          verbose = TRUE);
+    message("\nDone generating beta. Writing to rds file...\n","norm.signals_pc",numberpcs,".rds");
+	saveRDS(norm.beta, file = file.path(batchdirout, paste0("norm.signals_pc",numberpcs,".rds")));
+    norm.beta     <-  readRDS(file.path(batchdirout, paste0("norm.signals_pc",numberpcs,".rds")));
     beta <- as.data.frame(norm.beta)
 #    fwrite(beta,  file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved.txt"),
 #       sep = "\t", row.names = TRUE, nThread = 10 )
@@ -407,30 +419,30 @@ if(is.na(newsamplesheet)){
 HM450_hg19_Zhou <- fread(file.path("NormRcode/CNS13Krefset","HM450.hg19.manifest.tsv"),
                           data.table = FALSE,
                           stringsAsFactors = FALSE,
-                          check.names = FALSE)
+                          check.names = FALSE);
 
-HM450_hg19_Zhou_MASK  <- HM450_hg19_Zhou$probeID[HM450_hg19_Zhou$MASK_general == "TRUE"]
-HM450_hg19_Zhou_chrmX <- HM450_hg19_Zhou$probeID[HM450_hg19_Zhou$CpG_chrm == "chrX"]
-HM450_hg19_Zhou_chrmY <- HM450_hg19_Zhou$probeID[HM450_hg19_Zhou$CpG_chrm == "chrY"]
-HM450_hg19_Zhou_rs    <- HM450_hg19_Zhou$probeID[grepl("rs",HM450_hg19_Zhou$probeID)]
-HM450_hg19_Zhou_ch    <- HM450_hg19_Zhou$probeID[grepl("ch",HM450_hg19_Zhou$probeID)]
+HM450_hg19_Zhou_MASK  <- HM450_hg19_Zhou$probeID[HM450_hg19_Zhou$MASK_general == "TRUE"];
+HM450_hg19_Zhou_chrmX <- HM450_hg19_Zhou$probeID[HM450_hg19_Zhou$CpG_chrm == "chrX"];
+HM450_hg19_Zhou_chrmY <- HM450_hg19_Zhou$probeID[HM450_hg19_Zhou$CpG_chrm == "chrY"];
+HM450_hg19_Zhou_rs    <- HM450_hg19_Zhou$probeID[grepl("rs",HM450_hg19_Zhou$probeID)];
+HM450_hg19_Zhou_ch    <- HM450_hg19_Zhou$probeID[grepl("ch",HM450_hg19_Zhou$probeID)];
 
 EPIC_hg19_Zhou <- fread(file.path("NormRcode/CNS13Krefset","EPIC.hg19.manifest.tsv"),
                          data.table = FALSE,
                          stringsAsFactors = FALSE,
                          check.names = FALSE)
-EPIC_hg19_Zhou_MASK  <- EPIC_hg19_Zhou$probeID[EPIC_hg19_Zhou$MASK_general == "TRUE"]
-EPIC_hg19_Zhou_chrmX <- EPIC_hg19_Zhou$probeID[EPIC_hg19_Zhou$CpG_chrm == "chrX"]
-EPIC_hg19_Zhou_chrmY <- EPIC_hg19_Zhou$probeID[EPIC_hg19_Zhou$CpG_chrm == "chrY"]
-EPIC_hg19_Zhou_rs    <- EPIC_hg19_Zhou$probeID[grepl("rs",EPIC_hg19_Zhou$probeID)]
-EPIC_hg19_Zhou_ch    <- EPIC_hg19_Zhou$probeID[grepl("ch",EPIC_hg19_Zhou$probeID)]
+EPIC_hg19_Zhou_MASK  <- EPIC_hg19_Zhou$probeID[EPIC_hg19_Zhou$MASK_general == "TRUE"];
+EPIC_hg19_Zhou_chrmX <- EPIC_hg19_Zhou$probeID[EPIC_hg19_Zhou$CpG_chrm == "chrX"];
+EPIC_hg19_Zhou_chrmY <- EPIC_hg19_Zhou$probeID[EPIC_hg19_Zhou$CpG_chrm == "chrY"];
+EPIC_hg19_Zhou_rs    <- EPIC_hg19_Zhou$probeID[grepl("rs",EPIC_hg19_Zhou$probeID)];
+EPIC_hg19_Zhou_ch    <- EPIC_hg19_Zhou$probeID[grepl("ch",EPIC_hg19_Zhou$probeID)];
 
-EPIC_Illumina <- fread(file.path("NormRcode/CNS13Krefset","infinium-methylationepic-v-1-0-b5-manifest-file.csv"))
-EPIC_Illumina_MFG   <- EPIC_Illumina$IlmnID[EPIC_Illumina$MFG_Change_Flagged == "TRUE"]
-EPIC_Illumina_chrmX <- EPIC_Illumina$IlmnID[EPIC_Illumina$CHR == "X"]
-EPIC_Illumina_chrmY <- EPIC_Illumina$IlmnID[EPIC_Illumina$CHR == "Y"]
-EPIC_Illumina_rs    <- EPIC_Illumina$IlmnID[grepl("rs",EPIC_Illumina$IlmnID)]
-EPIC_Illumina_ch    <- EPIC_Illumina$IlmnID[grepl("ch",EPIC_Illumina$IlmnID)]
+EPIC_Illumina <- fread(file.path("NormRcode/CNS13Krefset","infinium-methylationepic-v-1-0-b5-manifest-file.csv"));
+EPIC_Illumina_MFG   <- EPIC_Illumina$IlmnID[EPIC_Illumina$MFG_Change_Flagged == "TRUE"];
+EPIC_Illumina_chrmX <- EPIC_Illumina$IlmnID[EPIC_Illumina$CHR == "X"];
+EPIC_Illumina_chrmY <- EPIC_Illumina$IlmnID[EPIC_Illumina$CHR == "Y"];
+EPIC_Illumina_rs    <- EPIC_Illumina$IlmnID[grepl("rs",EPIC_Illumina$IlmnID)];
+EPIC_Illumina_ch    <- EPIC_Illumina$IlmnID[grepl("ch",EPIC_Illumina$IlmnID)];
 
 bad.cpgs_filter <- unique(c(HM450_hg19_Zhou_MASK,
                             HM450_hg19_Zhou_chrmX,
@@ -446,19 +458,23 @@ bad.cpgs_filter <- unique(c(HM450_hg19_Zhou_MASK,
                             EPIC_Illumina_chrmX,
                             EPIC_Illumina_chrmY,
                             EPIC_Illumina_rs,
-                            EPIC_Illumina_ch))
+                            EPIC_Illumina_ch));
 
-bad.cpgs <- unique(c(bad.cpgs, bad.cpgs_filter))
+bad.cpgs <- unique(c(bad.cpgs, bad.cpgs_filter));
+saveRDS(bad.cpgs, file = file.path(batchdirout, "bad.cpgs.longlist.rds"));
+
 message("\nRemoving ", length(bad.cpgs), " of bad cpgs: mt, X, Y, SNPs");
-beta <- beta[!rownames(beta) %in% bad.cpgs_filter,]
-beta_t <- t(beta)
-rm(beta)
-beta_reduced <- beta_t[,Rfast::colVars(as.matrix(beta_t), std = TRUE, parallel = TRUE)>0.227]
-beta_reduced <- as.data.frame(beta_reduced)
-fwrite(beta_reduced, file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),
-       sep = "\t", row.names = TRUE )
-message("\nSaved transposed reduced file with beta for ", dim(beta_reduced)[2], " top variable cpgs with SD>0.227\n");
-#beta_reduced <- read.csv(file.path(batchdirout,"Betas_pc11_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),sep = "\t", row.names =1 )
+beta <- beta[!rownames(beta) %in% bad.cpgs_filter,];
+beta_t <- t(beta);
+rm(beta);
+beta_reduced <- beta_t[,Rfast::colVars(as.matrix(beta_t), std = TRUE, parallel = TRUE)>stdevcutoff];
+beta_reduced <- as.data.frame(beta_reduced);
+fwrite(beta_reduced, file.path(batchdirout, paste0("Betas_pc", numberpcs, 
+       "_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_", 
+	   stdevcutoff,"SDvarprbs.txt")),sep = "\t", row.names = TRUE );
+
+message("\nSaved transposed reduced file with beta for ", dim(beta_reduced)[2], " top variable cpgs with SD>", stdevcutoff, "\n");
+#beta_reduced <- read.csv(file.path(batchdirout,"Betas_pc14_fixedeffectsMaterialArray_badcgpsremoved_badsamplesremoved_0.227SDvariableprobes.txt"),sep = "\t", row.names =1 )
 
 message("\nExcluded samples with failed QCs:\n")
 print(bad_samples);
@@ -469,7 +485,9 @@ if (length(newsmplsfailedqc)>0) {
 }else{message("\nGood: No QC outliers in new batch\n")}; 
 
 #big cleanup
-rm(list=setdiff(ls(), c("beta_reduced", "anno_base", "newsmplsfailedqc", "newsamplesheet", "parameter", "batchdir", "batchdirout", "cores")))
+rm(list=setdiff(ls(), c("beta_reduced", "anno_base", "newsmplsfailedqc", "cores", 
+                        "newsamplesheet", "parameter", "batchdir", "batchdirout", 
+						"numberpcs", "kpcs4rdctn", "stdevcutoff")))
 gc()
 
 ##### fast PCA via RSpectra SVD by Martin Sill m.sill@dkfz.de (2018)
@@ -506,15 +524,15 @@ prcomp_svds <-
   }
 ####  This is optional reduction variable reduction. Makes picture sharper for big sets
 message("\nRun principal component reduction on reduced beta", Sys.time(), "...");
-PC <- prcomp_svds(beta_reduced, k=200) 
+PC <- prcomp_svds(beta_reduced, k=kpcs4rdctn) 
 #PC <- prcomp(as.matrix(beta_reduced), 
 #            center = TRUE, 
 #			 scale = FALSE,
 #			 rank. = 200); 
 
 
-saveRDS(PC, file.path(batchdirout,"combo_200pc_prcomp.rds"));
-PC <- readRDS(file.path(batchdirout,"combo_200pc_prcomp.rds"));
+saveRDS(PC,  file.path(batchdirout,  paste0("combo_",kpcs4rdctn,"pc_prcomp.rds")));
+PC <- readRDS(file.path(batchdirout, paste0("combo_",kpcs4rdctn,"pc_prcomp.rds")));
 beta_reduced <- PC$x;
 
 message("\nUmap straight on beta values   ", Sys.time(), "\ngenerating X and Y with uwot  ...");
@@ -535,7 +553,6 @@ dmap <- densmap(
         n_components = 2L,
         dens_frac = 0.3,
         dens_lambda = 0.1,
-
         #var_shift = 0.1,
         n_neighbors = 10L,
         metric = "cosine",
